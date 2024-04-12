@@ -40,13 +40,13 @@ fn main() -> Result<()> {
     let file = std::fs::read_to_string(file_name)?;
 
     // parse the file
-    let rom = file
+    let i_mem = file
         .split("\n")
         .map(|line| bit_vec_from_string(line).map(|bits| bit_vec_to_int(&bits)))
         .collect::<Result<Vec<u32>>>()?;
 
     // Initialize the CPU state
-    let mut cpu = CPU::new(rom);
+    let mut cpu = CPU::new(i_mem);
     cpu.initialize_rf(&register_mappings);
 
     // Run the CPU
