@@ -1,10 +1,11 @@
+use anyhow::Result;
 use ux::u4;
 
 use crate::{
     instruction::Instruction,
     registers::{RegisterFile, RegisterMapping},
-    signals::{ALUOp, ALUSrc, PCSrc},
-    stages::{EXMEM, IDEX, IF, IFID, MEMWB, WB},
+    signals::{control_unit, ControlSignals, PCSrc},
+    stages::{Immediate, EXMEM, IDEX, IF, IFID, MEMWB, WB},
 };
 
 /// a string that holds a report of what happened in the CPU during a clock cycle.
@@ -69,29 +70,6 @@ impl DataMemory {
 
         self.d_mem[address as usize / 4] = value;
     }
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
-pub struct ControlSignals {
-    /// tells the register file to write to the register specified by the instruction.
-    pub reg_write: Option<bool>,
-    /// The branch signal is a 1 bit signal that controls whether a branch *can* be taken. (It is not the branch condition itself. That is determined by the ALU zero signal.)
-    pub branch: Option<bool>,
-    /// The ALUSrc signal is a 1 bit signal that tells the ALU whether to use the register value (0) or the immediate value (1) as the second operand.
-    pub alu_src: Option<ALUSrc>,
-    /// The ALU operation signal is a 2 bit signal that tells the ALU Control Unit what type of instruction is being executed.
-    pub alu_op: Option<ALUOp>,
-    /// The mem_write signal is a 1 bit signal that tells the data memory unit whether to write to memory.
-    pub mem_write: Option<bool>,
-    /// controls whether the write back stages uses the output of the data memory unit or the ALU.
-    pub mem_to_reg: Option<bool>,
-    /// The mem_read signal is a 1 bit signal that tells the data memory unit whether to read from memory.
-    pub mem_read: Option<bool>,
-    /// The PCSrc signal is a 2 bit signal that tells the cpu where to get the next PC value from.
-    /// 00: PC + 4
-    /// 01: branch_target
-    /// 10: jump_target
-    pub pc_src: PCSrc,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -170,7 +148,7 @@ impl CPU {
     }
 
     /// Body of the main loop of the CPU simulator, separated for testing purposes
-    pub fn run_step(&mut self) -> Report {
+    pub fn run_step(&mut self) -> Result<Report> {
         let mut report = String::new();
 
         self.total_clock_cycles += 1;
@@ -178,12 +156,18 @@ impl CPU {
         report.push_str(format!("total_clock_cycles {} :", self.total_clock_cycles).as_str());
 
         let ifid = self.fetch(IF {});
+        let idex = self.decode(ifid)?;
+        let exmem = self.execute(idex);
+        let memwb = self.mem(exmem);
+        let _wb = self.write_back(memwb);
+
+        // if wb will tell us what datamemory / registers were updated, so we add those to the report
 
         todo!()
     }
 
     /// the Fetch stage of the CPU.
-    fn fetch(&mut self, if_reg: IF) -> IFID {
+    fn fetch(&mut self, _if_reg: IF) -> IFID {
         // increment the program counter
         self.pc = match self.control_signals.pc_src {
             PCSrc::Next => self.next_pc,
@@ -192,18 +176,64 @@ impl CPU {
         };
 
         // get the current instruction from the ROM
-        let machine_code = self.i_mem.get_instruction(self.pc);
+        let instruction_code = self.i_mem.get_instruction(self.pc);
 
         self.next_pc = self.pc + 4;
 
-        IFID {
-            instruction_code: machine_code,
-        }
+        IFID { instruction_code }
     }
 
-    fn decode(&mut self, ifid_reg: IFID) -> IDEX {
+    /// the Decode stage of the CPU.
+    fn decode(&mut self, ifid_reg: IFID) -> Result<IDEX> {
         // Implement the Decode stage here
-        todo!()
+        let instruction = Instruction::from_machine_code(ifid_reg.instruction_code)?;
+
+        // read the register file
+        let read_data_1 = match instruction {
+            Instruction::RType { rs1, .. }
+            | Instruction::IType { rs1, .. }
+            | Instruction::SType { rs1, .. }
+            | Instruction::SBType { rs1, .. } => Some(self.rf.read(rs1)),
+            Instruction::UType { .. } | Instruction::UJType { .. } => None,
+        };
+        let read_data_2 = match instruction {
+            Instruction::RType { rs2, .. }
+            | Instruction::SType { rs2, .. }
+            | Instruction::SBType { rs2, .. } => Some(self.rf.read(rs2)),
+            Instruction::IType { .. } | Instruction::UType { .. } | Instruction::UJType { .. } => {
+                None
+            }
+        };
+
+        // sign extend the immediate value
+        let immediate = match instruction {
+            Instruction::IType { imm, .. } => {
+                Immediate::SignedImmediate(i32::from(imm) << (32 - 12) >> (32 - 12))
+            }
+            Instruction::SType { imm, .. } => {
+                Immediate::AddressOffset(i32::from(imm) << (32 - 12) >> (32 - 12))
+            }
+            Instruction::SBType { imm, .. } => {
+                Immediate::BranchOffset(i32::from(imm) << (32 - 13) >> (32 - 13))
+            }
+            Instruction::UType { imm, .. } => {
+                Immediate::UpperImmediate(u32::from(imm) << (32 - 20))
+            }
+            Instruction::UJType { imm, .. } => {
+                Immediate::JumpOffset((u32::from(imm) as i32) << (32 - 21) >> (32 - 21))
+            }
+            Instruction::RType { .. } => Immediate::None,
+        };
+
+        // set the control signals
+        self.control_signals = control_unit(instruction.opcode());
+
+        Ok(IDEX {
+            instruction,
+            read_data_1,
+            read_data_2,
+            immediate,
+        })
     }
 
     fn execute(&mut self, idex_reg: IDEX) -> EXMEM {

@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
-use ux::{u2, u3, u7};
+use ux::{u3, u7};
 
-use crate::signals::ALUControl;
+use crate::signals::{ALUControl, ALUOp};
 
 /// This function mimics the ALU Control Unit in a risc-v processor, it takes in the ALU operation signal, the funct3 field of the instruction and the funct7 field of the instruction and returns the ALU control signal.
 ///
@@ -51,36 +51,37 @@ use crate::signals::ALUControl;
 ///     end
 /// endmodule
 /// ```
-pub fn alu_control_unit(alu_op: u2, funct3: Option<u3>, funct7: Option<u7>) -> Result<ALUControl> {
-    Ok(match (u8::from(alu_op), funct3, funct7) {
-        (0b00, _, _) => ALUControl::ADD,
-        (0b01, _, _) => ALUControl::SUB,
-        (0b10, Some(funct3), Some(funct7)) => match (u8::from(funct7), u8::from(funct3)) {
+pub fn alu_control_unit(
+    alu_op: ALUOp,
+    funct3: Option<u3>,
+    funct7: Option<u7>,
+) -> Result<ALUControl> {
+    Ok(match (alu_op, funct3.map(u8::from), funct7.map(u8::from)) {
+        (ALUOp::ADD, _, _) => ALUControl::ADD,
+        (ALUOp::SUB, _, _) => ALUControl::SUB,
+        (ALUOp::FUNCT, Some(funct3), Some(funct7)) => match (funct7, funct3) {
             (0b0000000, 0b000) => ALUControl::ADD,  // add
-            (0b1000000, 0b000) => ALUControl::SUB,  // sub
+            (0b0100000, 0b000) => ALUControl::SUB,  // sub
             (0b0000000, 0b111) => ALUControl::AND,  // and
             (0b0000000, 0b110) => ALUControl::OR,   // or
-            (0b0000000, 0b001) => ALUControl::SLL,  // sll
             (0b0000000, 0b010) => ALUControl::SLT,  // slt
             (0b0000000, 0b011) => ALUControl::SLTU, // sltu
             (0b0000000, 0b100) => ALUControl::XOR,  // xor
-            (0b0000000, 0b101) => ALUControl::SRL,  // srl
-            (0b0100000, 0b101) => ALUControl::SRA,  // sra
+            (0b0000000, 0b001) => ALUControl::SLL,  // sll, slli
+            (0b0000000, 0b101) => ALUControl::SRL,  // srl, srli
+            (0b0100000, 0b101) => ALUControl::SRA,  // sra, srai
             _ => bail!("Invalid funct3 and funct7 combination"),
         },
-        (0b11, Some(funct3), Some(funct7)) => match (u8::from(funct7), u8::from(funct3)) {
-            (_, 0b000) => ALUControl::ADD,         // addi
-            (_, 0b010) => ALUControl::SLT,         // slti
-            (_, 0b011) => ALUControl::SLTU,        // sltui
-            (_, 0b100) => ALUControl::XOR,         // xori
-            (_, 0b110) => ALUControl::OR,          // ori
-            (_, 0b111) => ALUControl::AND,         // andi
-            (0b0000000, 0b001) => ALUControl::SLL, // slli
-            (0b0000000, 0b101) => ALUControl::SRL, // srli
-            (0b0100000, 0b101) => ALUControl::SRA, // srai
+        (ALUOp::FUNCT, Some(funct3), None) => match funct3 {
+            0b000 => ALUControl::ADD,  // addi
+            0b010 => ALUControl::SLT,  // slti
+            0b011 => ALUControl::SLTU, // sltui
+            0b100 => ALUControl::XOR,  // xori
+            0b110 => ALUControl::OR,   // ori
+            0b111 => ALUControl::AND,  // andi
             _ => bail!("Invalid funct3 and funct7 combination"),
         },
-        _ => unreachable!(),
+        _ => bail!("Invalid ALU operation"),
     })
 }
 
