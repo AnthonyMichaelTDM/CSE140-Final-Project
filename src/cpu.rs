@@ -4,6 +4,7 @@ use crate::{
     instruction::Instruction,
     registers::{RegisterFile, RegisterMapping},
     signals::{ALUOp, ALUSrc, PCSrc},
+    stages::{EXMEM, IDEX, IF, IFID, MEMWB, WB},
 };
 
 /// a string that holds a report of what happened in the CPU during a clock cycle.
@@ -164,13 +165,25 @@ impl CPU {
     }
 
     /// Main loop of the CPU simulator
-    pub fn run(&mut self) {}
+    pub fn run(&mut self) {
+        todo!()
+    }
 
     /// Body of the main loop of the CPU simulator, separated for testing purposes
-    pub fn run_step(&mut self) {}
+    pub fn run_step(&mut self) -> Report {
+        let mut report = String::new();
+
+        self.total_clock_cycles += 1;
+
+        report.push_str(format!("total_clock_cycles {} :", self.total_clock_cycles).as_str());
+
+        let ifid = self.fetch(IF {});
+
+        todo!()
+    }
 
     /// the Fetch stage of the CPU.
-    fn fetch(&mut self) -> u32 {
+    fn fetch(&mut self, if_reg: IF) -> IFID {
         // increment the program counter
         self.pc = match self.control_signals.pc_src {
             PCSrc::Next => self.next_pc,
@@ -183,22 +196,28 @@ impl CPU {
 
         self.next_pc = self.pc + 4;
 
-        machine_code
+        IFID {
+            instruction_code: machine_code,
+        }
     }
 
-    fn decode(&mut self) {
+    fn decode(&mut self, ifid_reg: IFID) -> IDEX {
         // Implement the Decode stage here
+        todo!()
     }
 
-    fn execute(&mut self) {
+    fn execute(&mut self, idex_reg: IDEX) -> EXMEM {
         // Implement the Execute stage here
+        todo!()
     }
 
-    fn mem(&mut self) {
+    fn mem(&mut self, exmem_reg: EXMEM) -> MEMWB {
         // Implement the Memory stage here
+        todo!()
     }
 
-    fn write_back(&mut self) {
+    fn write_back(&mut self, memwb_reg: MEMWB) -> WB {
         // Implement the Write Back stage here
+        todo!()
     }
 }
