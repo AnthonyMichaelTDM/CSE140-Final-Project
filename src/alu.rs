@@ -92,12 +92,141 @@ pub fn alu(alu_control: ALUControl, a: u32, b: u32) -> (bool, u32) {
         ALUControl::AND => a & b,
         ALUControl::OR => a | b,
         ALUControl::SLL => a << b,
-        ALUControl::SLT => ((a as i32) < b as i32) as u32,
-        ALUControl::SLTU => (a < b) as u32,
+        ALUControl::SLT => u32::from((a as i32) < (b as i32)),
+        ALUControl::SLTU => u32::from(a < b),
         ALUControl::XOR => a ^ b,
         ALUControl::SRL => a >> b,
         ALUControl::SRA => (a as i32 >> b) as u32,
     };
 
     (result == 0, result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn test_alu_add() {
+        assert_eq!((false, 3), alu(ALUControl::ADD, 1, 2));
+        assert_eq!((true, 0), alu(ALUControl::ADD, 0, 0));
+        assert_eq!(
+            (false, -3i32 as u32),
+            alu(ALUControl::ADD, -1i32 as u32, -2i32 as u32)
+        );
+        assert_eq!((true, 0), alu(ALUControl::ADD, -1i32 as u32, 1));
+        assert_eq!((false, 1), alu(ALUControl::ADD, -3i32 as u32, 4));
+        assert_eq!((false, -1i32 as u32), alu(ALUControl::ADD, 0, -1i32 as u32));
+        assert_eq!((false, -1i32 as u32), alu(ALUControl::ADD, -3i32 as u32, 2));
+    }
+
+    #[test]
+    fn test_alu_sub() {
+        assert_eq!((false, 1), alu(ALUControl::SUB, 3, 2));
+        assert_eq!((true, 0), alu(ALUControl::SUB, 0, 0));
+        assert_eq!((false, 1), alu(ALUControl::SUB, 1, 0));
+        assert_eq!((true, 0), alu(ALUControl::SUB, 1, 1));
+        assert_eq!((false, 1), alu(ALUControl::SUB, 0, -1i32 as u32));
+        assert_eq!((false, 1), alu(ALUControl::SUB, -1i32 as u32, -2i32 as u32));
+        assert_eq!(
+            (false, -1i32 as u32),
+            alu(ALUControl::SUB, -3i32 as u32, -2i32 as u32)
+        );
+    }
+
+    #[test]
+    fn test_alu_and() {
+        assert_eq!((true, 0b0000), alu(ALUControl::AND, 0b1010, 0b0101));
+        assert_eq!((false, 0b1010), alu(ALUControl::AND, 0b1010, 0b1111));
+        assert_eq!((true, 0), alu(ALUControl::AND, 0, 0));
+        assert_eq!((false, 0b1111), alu(ALUControl::AND, 0b1111, 0b1111));
+    }
+
+    #[test]
+    fn test_alu_or() {
+        assert_eq!((false, 0b1111), alu(ALUControl::OR, 0b1010, 0b0101));
+        assert_eq!((false, 0b1111), alu(ALUControl::OR, 0b1010, 0b1111));
+        assert_eq!((true, 0), alu(ALUControl::OR, 0, 0));
+        assert_eq!((false, 0b1111), alu(ALUControl::OR, 0b1111, 0b1111));
+    }
+
+    #[test]
+    fn test_alu_sll() {
+        assert_eq!((false, 0xF000_0000), alu(ALUControl::SLL, 0x0F00_0000, 4));
+        assert_eq!((true, 0x0000_0000), alu(ALUControl::SLL, 0xF000_0000, 4));
+        assert_eq!((true, 0), alu(ALUControl::SLL, 0, 0));
+        assert_eq!((false, 0x0F00_0000), alu(ALUControl::SLL, 0x0F00_0000, 0));
+        assert_eq!((false, 0x1E00_0000), alu(ALUControl::SLL, 0x0F00_0000, 1));
+    }
+
+    #[test]
+    fn test_alu_slt() {
+        assert_eq!((1, 0), (true as u32, false as u32));
+
+        // two positive numbers
+        assert_eq!((false, 1), alu(ALUControl::SLT, 1, 2));
+        assert_eq!((true, 0), alu(ALUControl::SLT, 0, 0));
+        assert_eq!((true, 0), alu(ALUControl::SLT, 1, 1));
+        assert_eq!((true, 0), alu(ALUControl::SLT, 2, 1));
+        // one positive and one negative number
+        assert_eq!((false, 1), alu(ALUControl::SLT, -1i32 as u32, 0));
+        assert_eq!((true, 0), alu(ALUControl::SLT, 0, -1i32 as u32));
+        assert_eq!((false, 1), alu(ALUControl::SLT, -1i32 as u32, 1));
+        assert_eq!((true, 0), alu(ALUControl::SLT, 1, -1i32 as u32));
+        // two negative numbers
+        assert_eq!((true, 0), alu(ALUControl::SLT, -1i32 as u32, -2i32 as u32));
+        assert_eq!((false, 1), alu(ALUControl::SLT, -2i32 as u32, -1i32 as u32));
+        assert_eq!((true, 0), alu(ALUControl::SLT, -1i32 as u32, -1i32 as u32));
+    }
+
+    #[test]
+    fn test_alu_sltu() {
+        // two positive numbers (behaves the same)
+        assert_eq!((false, 1), alu(ALUControl::SLTU, 1, 2));
+        assert_eq!((true, 0), alu(ALUControl::SLTU, 0, 0));
+        assert_eq!((true, 0), alu(ALUControl::SLTU, 1, 1));
+        assert_eq!((true, 0), alu(ALUControl::SLTU, 2, 1));
+        // one positive and one negative number (behaves opposite)
+        assert_eq!((true, 0), alu(ALUControl::SLTU, -1i32 as u32, 0));
+        assert_eq!((false, 1), alu(ALUControl::SLTU, 0, -1i32 as u32));
+        assert_eq!((true, 0), alu(ALUControl::SLTU, -1i32 as u32, 1));
+        assert_eq!((false, 1), alu(ALUControl::SLTU, 1, -1i32 as u32));
+        // two negative numbers (behaves the same)
+        assert_eq!((true, 0), alu(ALUControl::SLTU, -1i32 as u32, -2i32 as u32));
+        assert_eq!(
+            (false, 1),
+            alu(ALUControl::SLTU, -2i32 as u32, -1i32 as u32)
+        );
+        assert_eq!((true, 0), alu(ALUControl::SLTU, -1i32 as u32, -1i32 as u32));
+    }
+
+    #[test]
+    fn test_alu_xor() {
+        assert_eq!((false, 0b1111), alu(ALUControl::XOR, 0b1010, 0b0101));
+        assert_eq!((false, 0b0111), alu(ALUControl::XOR, 0b1010, 0b1101));
+        assert_eq!((true, 0), alu(ALUControl::XOR, 0, 0));
+        assert_eq!((true, 0b0000), alu(ALUControl::XOR, 0b1111, 0b1111));
+    }
+
+    #[test]
+    fn test_alu_srl() {
+        assert_eq!((false, 0x00F0_0000), alu(ALUControl::SRL, 0x0F00_0000, 4));
+        assert_eq!((false, 0x0F00_0000), alu(ALUControl::SRL, 0xF000_000F, 4));
+        assert_eq!((true, 0), alu(ALUControl::SRL, 0, 0));
+        assert_eq!((false, 0x0F00_0000), alu(ALUControl::SRL, 0x0F00_0000, 0));
+        assert_eq!((false, 0x0780_0000), alu(ALUControl::SRL, 0x0F00_0000, 1));
+        assert_eq!((false, 0x7800_0000), alu(ALUControl::SRL, 0xF000_0000, 1));
+    }
+
+    #[test]
+    fn test_alu_sra() {
+        assert_eq!((false, 0x00F0_0000), alu(ALUControl::SRA, 0x0F00_0000, 4));
+        assert_eq!((false, 0xFF00_0000), alu(ALUControl::SRA, 0xF000_000F, 4));
+        assert_eq!((true, 0), alu(ALUControl::SRA, 0, 0));
+        assert_eq!((false, 0x0F00_0000), alu(ALUControl::SRA, 0x0F00_0000, 0));
+        assert_eq!((false, 0x0780_0000), alu(ALUControl::SRL, 0x0F00_0000, 1));
+        assert_eq!((false, 0xF800_0000), alu(ALUControl::SRA, 0xF000_0000, 1));
+    }
 }

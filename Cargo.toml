@@ -11,3 +11,6 @@ derive_more = "0.99"
 strum = "0.26"
 strum_macros = "0.26"
 ux = "0.1.6"
+
+[dev-dependencies]
+pretty_assertions = "1.4"
