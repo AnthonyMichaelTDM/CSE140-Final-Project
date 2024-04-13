@@ -15,9 +15,9 @@ pub enum Instruction {
     },
     IType {
         /// only used for the shift instructions
-        funct7: u7,
+        funct7: Option<u7>,
         // only used for the shift instructions
-        shamt: u5,
+        shamt: Option<u5>,
         imm: i12,
         rs1: RegisterMapping,
         funct3: u3,
@@ -66,7 +66,9 @@ impl Instruction {
 
         match u8::from(opcode) {
             // R-type instructions
-            0b011_0011 | 0b011_1011 => {
+            0b011_0011 // arithmetic instructions
+            | 0b011_1011 // arithmetic instructions (word width (only available on RV64, not implemented))
+            => {
                 // mask out the fields
                 let funct7: u7 = u7::new(((machine_code >> 25) & 0b111_1111) as u8);
 
@@ -80,9 +82,22 @@ impl Instruction {
                 })
             }
             // I-type instructions
-            0b000_0011 | 0b000_1111 | 0b001_0011 | 0b001_1011 | 0b110_0111 | 0b111_0011 => {
-                let funct7: u7 = u7::new(((machine_code >> 25) & 0b111_1111) as u8);
-                let shamt: u5 = u5::new(((machine_code >> 20) & 0b11111) as u8);
+            0b000_0011 // load instructions
+            | 0b000_1111 // fence instructions (not implemented)
+            | 0b001_0011 // arithmetic instructions
+            | 0b001_1011 // arithmetic instructions (word width (only available on RV64, not implemented))
+            | 0b110_0111 // jalr
+            | 0b111_0011 // system instructions (not implemented)
+            => {
+                let (funct7, shamt) = match (u8::from(opcode), u8::from(funct3)) {
+                    // shift operations
+                    (0b001_0011, 0b001 | 0b101) => (
+                        Some(u7::new(((machine_code >> 25) & 0b111_1111) as u8)),
+                        Some(u5::new(((machine_code >> 20) & 0b11111) as u8)),
+                    ),
+                    // other i type ops
+                    _ => (None, None),
+                };
 
                 // convert to i32 so that our shift operations are sign extended, and we're explicity okay with the possible wrap
                 #[allow(clippy::cast_possible_wrap)]
@@ -146,7 +161,9 @@ impl Instruction {
                 })
             }
             // U-type instructions
-            0b001_0111 | 0b011_0111 => {
+            0b001_0111 // auipc
+            | 0b011_0111 // lui
+            => {
                 #[allow(clippy::cast_possible_wrap)]
                 #[allow(clippy::cast_sign_loss)]
                 let imm: u20 = u20::new((((machine_code & 0xFFFF_F000) as i32) >> 12) as u32);
@@ -190,6 +207,27 @@ impl Instruction {
             | Self::UJType { opcode, .. } => *opcode,
         }
     }
+
+    pub fn funct3(&self) -> Option<u3> {
+        match self {
+            Self::RType { funct3, .. }
+            | Self::IType { funct3, .. }
+            | Self::SType { funct3, .. }
+            | Self::SBType { funct3, .. } => Some(*funct3),
+            Self::UType { .. } | Self::UJType { .. } => None,
+        }
+    }
+
+    pub fn funct7(&self) -> Option<u7> {
+        match self {
+            Self::RType { funct7, .. }
+            | Self::IType {
+                funct7: Some(funct7),
+                ..
+            } => Some(*funct7),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -197,6 +235,7 @@ mod tests {
     use super::*;
 
     use anyhow::Result;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn test_add() -> Result<()> {
@@ -222,8 +261,8 @@ mod tests {
         assert_eq!(
             instruction,
             Instruction::IType {
-                funct7: u7::new(0),
-                shamt: u5::new(0b01010),
+                funct7: None,
+                shamt: None,
                 imm: i12::new(0xA),
                 rs1: RegisterMapping::A2,
                 funct3: u3::new(0b111),
