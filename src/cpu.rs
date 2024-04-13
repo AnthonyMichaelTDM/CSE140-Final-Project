@@ -2,9 +2,10 @@ use anyhow::Result;
 use ux::u4;
 
 use crate::{
+    alu::{alu, alu_control_unit},
     instruction::Instruction,
     registers::{RegisterFile, RegisterMapping},
-    signals::{control_unit, ControlSignals, PCSrc},
+    signals::{control_unit, ALUControl, ALUSrcA, ALUSrcB, ControlSignals, PCSrc},
     stages::{Immediate, EXMEM, IDEX, IF, IFID, MEMWB, WB},
 };
 
@@ -77,18 +78,14 @@ pub struct CPU {
     pc: u32,
     /// This variable will be updated by Fetch() function and used as the PC value in the next cycle if no branch or jump was taken.
     next_pc: u32,
-    /// This variable will be updated by Execute() function and used when deciding to use branch target address in the next cycle.
-    /// The zero variable will be set to 1 by ALU when the computation result is zero and unset to 0 if otherwise.
-    alu_zero: bool,
-    alu_ctrl: u4,
     /// This variable will be updated by Execute() function and used by Fetch() function to decide the PC value of the next cycle.
     /// The branch_target variable will be set to the target address of the branch instruction.
     /// This will be used as the PC value in the next cycle if a branch was taken.
-    branch_target: u32,
+    branch_target: Option<u32>,
     /// This variable will be updated by Execute() function and used by Fetch() function to decide the PC value of the next cycle.
     /// The jump_target variable will be set to the target address of the jump instruction.
     /// This will be used as the PC value in the next cycle if a jump was taken.
-    jump_target: u32,
+    jump_target: Option<u32>,
     total_clock_cycles: u64,
     control_signals: ControlSignals,
     /// an integer array that has 32 entries.
@@ -122,10 +119,8 @@ impl CPU {
         Self {
             pc: 0,
             next_pc: 0,
-            alu_zero: false,
-            alu_ctrl: u4::new(0),
-            branch_target: 0,
-            jump_target: 0,
+            branch_target: None,
+            jump_target: None,
             total_clock_cycles: 0,
             control_signals: ControlSignals::default(),
             rf: RegisterFile::new(),
@@ -157,11 +152,11 @@ impl CPU {
 
         let ifid = self.fetch(IF {});
         let idex = self.decode(ifid)?;
-        let exmem = self.execute(idex);
+        let exmem = self.execute(idex)?;
         let memwb = self.mem(exmem);
         let _wb = self.write_back(memwb);
 
-        // if wb will tell us what datamemory / registers were updated, so we add those to the report
+        // wb will tell us what datamemory / registers were updated, so we add those to the report
 
         todo!()
     }
@@ -171,8 +166,8 @@ impl CPU {
         // increment the program counter
         self.pc = match self.control_signals.pc_src {
             PCSrc::Next => self.next_pc,
-            PCSrc::BranchTarget => self.branch_target,
-            PCSrc::JumpTarget => self.jump_target,
+            PCSrc::BranchTarget => self.branch_target.unwrap(),
+            PCSrc::JumpTarget => self.jump_target.unwrap(),
         };
 
         // get the current instruction from the ROM
@@ -236,18 +231,254 @@ impl CPU {
         })
     }
 
-    fn execute(&mut self, idex_reg: IDEX) -> EXMEM {
-        // Implement the Execute stage here
-        todo!()
+    /// the Execute stage of the CPU.
+    ///
+    /// TODO: branch and jump address handling
+    fn execute(&mut self, idex_reg: IDEX) -> Result<EXMEM> {
+        // ALU control unit
+        let alu_control = alu_control_unit(
+            self.control_signals.alu_op,
+            idex_reg.instruction.funct3(),
+            idex_reg.instruction.funct7(),
+        )?;
+
+        // ALU operation
+        let alu_operand_a: u32 = match self.control_signals.alu_src_a {
+            ALUSrcA::Register => idex_reg.read_data_1.unwrap(), // TODO: data forwarding
+            ALUSrcA::PC => self.pc,
+            ALUSrcA::Constant0 => 0,
+        };
+        let alu_operand_b: u32 = match self.control_signals.alu_src_b {
+            ALUSrcB::Register => idex_reg.read_data_2.unwrap(), // TODO: data forwarding
+            ALUSrcB::Immediate => match idex_reg.immediate {
+                Immediate::SignedImmediate(imm) => imm as u32,
+                Immediate::AddressOffset(imm) => imm as u32,
+                Immediate::BranchOffset(imm) => imm as u32,
+                Immediate::JumpOffset(imm) => imm as u32,
+                Immediate::UpperImmediate(imm) => imm,
+                Immediate::None => 0,
+            },
+            ALUSrcB::Constant4 => 4,
+        };
+
+        let (alu_zero, alu_result) = alu(alu_control, alu_operand_a, alu_operand_b);
+
+        // branch and jump address calculation
+        if self.control_signals.branch && alu_zero {
+            self.branch_target = Some(alu_result);
+        }
+
+        Ok(EXMEM {
+            instruction: idex_reg.instruction,
+            alu_result,
+            alu_zero,
+            read_data_2: idex_reg.read_data_2,
+        })
     }
 
-    fn mem(&mut self, exmem_reg: EXMEM) -> MEMWB {
+    fn mem(&mut self, _exmem_reg: EXMEM) -> MEMWB {
         // Implement the Memory stage here
+
         todo!()
     }
 
-    fn write_back(&mut self, memwb_reg: MEMWB) -> WB {
+    /// todo: if there's a jump, we need to store the return address in the register file
+    fn write_back(&mut self, _memwb_reg: MEMWB) -> WB {
         // Implement the Write Back stage here
         todo!()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+    use ux::{i12, u3, u7};
+
+    use super::*;
+    use crate::instruction::Instruction;
+
+    #[test]
+    fn test_cpu_new() {
+        let rom = vec![0; 32];
+        let cpu = CPU::new(rom);
+
+        assert_eq!(cpu.pc, 0);
+        assert_eq!(cpu.next_pc, 0);
+        assert_eq!(cpu.branch_target, None);
+        assert_eq!(cpu.jump_target, None);
+        assert_eq!(cpu.total_clock_cycles, 0);
+        assert_eq!(cpu.control_signals, ControlSignals::default());
+        assert_eq!(cpu.rf, RegisterFile::new());
+        assert_eq!(cpu.d_mem, DataMemory::new());
+        assert_eq!(cpu.i_mem.rom, vec![0; 32]);
+    }
+
+    #[test]
+    fn test_cpu_initialize_rf() {
+        let rom = vec![0; 32];
+        let mut cpu = CPU::new(rom);
+
+        let mappings = &[
+            (RegisterMapping::Ra, 1),
+            (RegisterMapping::Sp, 2),
+            (RegisterMapping::Gp, 3),
+            (RegisterMapping::Tp, 4),
+            (RegisterMapping::T0, 5),
+            (RegisterMapping::T1, 6),
+            (RegisterMapping::T2, 7),
+            (RegisterMapping::S0, 8),
+            (RegisterMapping::S1, 9),
+            (RegisterMapping::A0, 10),
+            (RegisterMapping::A1, 11),
+            (RegisterMapping::A2, 12),
+            (RegisterMapping::A3, 13),
+            (RegisterMapping::A4, 14),
+            (RegisterMapping::A5, 15),
+            (RegisterMapping::A6, 16),
+            (RegisterMapping::A7, 17),
+            (RegisterMapping::S2, 18),
+            (RegisterMapping::S3, 19),
+            (RegisterMapping::S4, 20),
+            (RegisterMapping::S5, 21),
+            (RegisterMapping::S6, 22),
+            (RegisterMapping::S7, 23),
+            (RegisterMapping::S8, 24),
+            (RegisterMapping::S9, 25),
+            (RegisterMapping::S10, 26),
+            (RegisterMapping::S11, 27),
+            (RegisterMapping::T3, 28),
+            (RegisterMapping::T4, 29),
+            (RegisterMapping::T5, 30),
+            (RegisterMapping::T6, 31),
+        ];
+
+        cpu.initialize_rf(mappings);
+
+        for (mapping, value) in mappings {
+            assert_eq!(cpu.rf.read(*mapping), *value);
+        }
+    }
+
+    #[test]
+    fn test_cpu_fetch() {
+        let rom = vec![0x00000013, 0x00000093, 0x00000073, 0x00000033];
+        let mut cpu = CPU::new(rom);
+
+        let ifid = cpu.fetch(IF {});
+
+        assert_eq!(ifid.instruction_code, 0x00000013);
+        assert_eq!(cpu.pc, 0);
+        assert_eq!(cpu.next_pc, 4);
+
+        let ifid = cpu.fetch(IF {});
+
+        assert_eq!(ifid.instruction_code, 0x00000093);
+        assert_eq!(cpu.pc, 4);
+        assert_eq!(cpu.next_pc, 8);
+
+        let ifid = cpu.fetch(IF {});
+
+        assert_eq!(ifid.instruction_code, 0x00000073);
+        assert_eq!(cpu.pc, 8);
+        assert_eq!(cpu.next_pc, 12);
+
+        let ifid = cpu.fetch(IF {});
+
+        assert_eq!(ifid.instruction_code, 0x00000033);
+        assert_eq!(cpu.pc, 12);
+        assert_eq!(cpu.next_pc, 16);
+    }
+
+    #[test]
+    #[ignore = "control unit not implemented"]
+    fn test_cpu_decode() {
+        let rom = vec![0x00000013, 0x00000093, 0x00000073, 0x00000033];
+        let mut cpu = CPU::new(rom);
+
+        let ifid = cpu.fetch(IF {});
+        let idex = cpu.decode(ifid).unwrap();
+
+        assert_eq!(
+            idex.instruction,
+            Instruction::IType {
+                funct7: None,
+                shamt: None,
+                opcode: u7::new(0b0010011),
+                rd: RegisterMapping::Ra,
+                funct3: u3::new(0),
+                rs1: RegisterMapping::Zero,
+                imm: i12::new(0),
+            }
+        );
+        assert_eq!(idex.read_data_1, Some(0));
+        assert_eq!(idex.read_data_2, None);
+        assert_eq!(idex.immediate, Immediate::SignedImmediate(0));
+    }
+
+    #[test]
+    #[ignore = "control unit not implemented"]
+    fn test_cpu_execute() {
+        let rom = vec![0x00000013, 0x00000093, 0x00000073, 0x00000033];
+        let mut cpu = CPU::new(rom);
+
+        let ifid = cpu.fetch(IF {});
+        let idex = cpu.decode(ifid).unwrap();
+        let exmem = cpu.execute(idex).unwrap();
+
+        assert_eq!(
+            exmem.instruction,
+            Instruction::IType {
+                funct7: None,
+                shamt: None,
+                opcode: u7::new(0b0010011),
+                rd: RegisterMapping::Ra,
+                funct3: u3::new(0),
+                rs1: RegisterMapping::Zero,
+                imm: i12::new(0),
+            }
+        );
+        assert_eq!(exmem.alu_result, 0);
+        assert_eq!(exmem.alu_zero, true);
+        assert_eq!(exmem.read_data_2, None);
+    }
+
+    #[test]
+    #[ignore = "not implemented"]
+    fn test_cpu_mem() {
+        let rom = vec![0x00000013, 0x00000093, 0x00000073, 0x00000033];
+        let mut cpu = CPU::new(rom);
+
+        let ifid = cpu.fetch(IF {});
+        let idex = cpu.decode(ifid).unwrap();
+        let exmem = cpu.execute(idex).unwrap();
+        let memwb = cpu.mem(exmem);
+
+        assert_eq!(
+            memwb.instruction,
+            Instruction::IType {
+                funct7: None,
+                shamt: None,
+                opcode: u7::new(0b0010011),
+                rd: RegisterMapping::Ra,
+                funct3: u3::new(0),
+                rs1: RegisterMapping::Zero,
+                imm: i12::new(0),
+            }
+        );
+    }
+
+    #[test]
+    #[ignore = "not implemented"]
+    fn test_cpu_write_back() {
+        let rom = vec![0x00000013, 0x00000093, 0x00000073, 0x00000033];
+        let mut cpu = CPU::new(rom);
+
+        let ifid = cpu.fetch(IF {});
+        let idex = cpu.decode(ifid).unwrap();
+        let exmem = cpu.execute(idex).unwrap();
+        let memwb = cpu.mem(exmem);
+        let wb = cpu.write_back(memwb);
+
+        assert_eq!(wb, WB {});
     }
 }
