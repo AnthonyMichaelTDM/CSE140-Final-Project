@@ -146,7 +146,24 @@ impl CPU {
 
     /// Main loop of the CPU simulator
     pub fn run(&mut self) {
-        todo!()
+        loop {
+            println!();
+            match self.run_step() {
+                Ok(report) => {
+                    println!("{}", report);
+                }
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    break;
+                }
+            }
+
+            // if all the stage registers are flushed, we can stop the simulation
+            todo!()
+        }
+
+        println!("program terminated:");
+        println!("total execution time is {} cycles", self.total_clock_cycles);
     }
 
     /// Body of the main loop of the CPU simulator, separated for testing purposes
@@ -160,12 +177,14 @@ impl CPU {
         let ifid = self.fetch(IF {});
         let idex = self.decode(ifid)?;
         let exmem = self.execute(idex)?;
-        let memwb = self.mem(exmem);
-        let _wb = self.write_back(memwb);
+        let (memwb, mem_report) = self.mem(exmem);
+        // mem will tell us if data memory was updated, so we add that to the report
+        report.push_str(&mem_report);
+        let wb_report = self.write_back(memwb);
+        // wb will tell us if registers were updated, so we add those to the report
+        report.push_str(&wb_report);
 
-        // wb will tell us what datamemory / registers were updated, so we add those to the report
-
-        todo!()
+        Ok(report)
     }
 
     /// the Fetch stage of the CPU.
@@ -334,14 +353,14 @@ impl CPU {
     }
 
     /// the Memory stage of the CPU.
-    fn mem(&mut self, exmem_reg: EXMEM) -> MEMWB {
+    fn mem(&mut self, exmem_reg: EXMEM) -> (MEMWB, String) {
         // if the execute stage failed, flush
         if exmem_reg.instruction == Instruction::Flush {
-            return MEMWB {
+            return (MEMWB {
                 instruction: Instruction::Flush,
                 alu_result: 0,
                 mem_read_data: None,
-            };
+            }, String::new());
         }
 
         // Implement the Memory stage here
@@ -350,28 +369,32 @@ impl CPU {
             (true, false) => {
                 // load
                 let mem_read_data = self.d_mem.read(exmem_reg.alu_result);
-                MEMWB {
+                (MEMWB {
                     instruction: exmem_reg.instruction,
                     alu_result: exmem_reg.alu_result,
                     mem_read_data: Some(mem_read_data),
-                }
+                },
+                String::new()
+                )
             }
             (false, true) => {
                 // store
                 self.d_mem.write(exmem_reg.alu_result, exmem_reg.read_data_2.expect("no data to store"));
-                MEMWB {
+                (MEMWB {
                     instruction: exmem_reg.instruction,
                     alu_result: exmem_reg.alu_result,
                     mem_read_data: None,
-                }
+                },
+                format!("memory 0x{:x} is modified to 0x{:x}",exmem_reg.alu_result,exmem_reg.read_data_2.expect("no data to store"))
+                )
             }
             (false, false) => {
                 // no memory operation
-                MEMWB {
+                (MEMWB {
                     instruction: exmem_reg.instruction,
                     alu_result: exmem_reg.alu_result,
                     mem_read_data: None,
-                }
+                },String::new())
             }
             (true,true) => panic!("invalid control signals for memory stage"),
         }
@@ -705,7 +728,7 @@ mod tests {
         let ifid = cpu.fetch(IF {});
         let idex = cpu.decode(ifid).unwrap();
         let exmem = cpu.execute(idex).unwrap();
-        let memwb = cpu.mem(exmem);
+        let (memwb, _) = cpu.mem(exmem);
 
         assert_eq!(memwb.mem_read_data, Some(10));
     }
@@ -718,7 +741,7 @@ mod tests {
         let ifid = cpu.fetch(IF {});
         let idex = cpu.decode(ifid).unwrap();
         let exmem = cpu.execute(idex).unwrap();
-        let memwb = cpu.mem(exmem);
+        let (memwb, _) = cpu.mem(exmem);
         cpu.write_back(memwb);
 
         assert_eq!(cpu.rf.read(RegisterMapping::A3), 10);
