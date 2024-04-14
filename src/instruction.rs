@@ -3,7 +3,7 @@ use ux::{i12, i13, u20, u21, u3, u5, u7};
 
 use crate::registers::RegisterMapping;
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Default)]
 pub enum Instruction {
     RType {
         funct7: u7,
@@ -48,6 +48,9 @@ pub enum Instruction {
         rd: RegisterMapping,
         opcode: u7,
     },
+    #[default]
+    /// used to flush the pipeline
+    Flush,
 }
 
 impl Instruction {
@@ -197,14 +200,15 @@ impl Instruction {
         }
     }
 
-    pub fn opcode(&self) -> u7 {
+    pub fn opcode(&self) -> Option<u7> {
         match self {
             Self::RType { opcode, .. }
             | Self::IType { opcode, .. }
             | Self::SType { opcode, .. }
             | Self::SBType { opcode, .. }
             | Self::UType { opcode, .. }
-            | Self::UJType { opcode, .. } => *opcode,
+            | Self::UJType { opcode, .. } => Some(*opcode),
+            Self::Flush => None,
         }
     }
 
@@ -214,7 +218,7 @@ impl Instruction {
             | Self::IType { funct3, .. }
             | Self::SType { funct3, .. }
             | Self::SBType { funct3, .. } => Some(*funct3),
-            Self::UType { .. } | Self::UJType { .. } => None,
+            Self::UType { .. } | Self::UJType { .. } | Self::Flush => None,
         }
     }
 
@@ -226,6 +230,25 @@ impl Instruction {
                 ..
             } => Some(*funct7),
             _ => None,
+        }
+    }
+
+    pub fn shamt(&self) -> Option<u5> {
+        match self {
+            Self::IType {
+                shamt: Some(shamt), ..
+            } => Some(*shamt),
+            _ => None,
+        }
+    }
+
+    pub fn rd(&self) -> Option<RegisterMapping> {
+        match self {
+            Self::RType { rd, .. }
+            | Self::IType { rd, .. }
+            | Self::UType { rd, .. }
+            | Self::UJType { rd, .. } => Some(*rd),
+            Self::SType { .. } | Self::SBType { .. } | Self::Flush => None,
         }
     }
 }
@@ -358,6 +381,25 @@ mod tests {
                 imm: u20::new(0x186a0),
                 rd: RegisterMapping::T1,
                 opcode: u7::new(0b011_0111),
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_lw() -> Result<()> {
+        let machine_code: u32 = 0x0043_A283;
+        let instruction = Instruction::from_machine_code(machine_code)?;
+        assert_eq!(
+            instruction,
+            Instruction::IType {
+                funct7: None,
+                shamt: None,
+                imm: i12::new(4),
+                rs1: RegisterMapping::T2,
+                funct3: u3::new(0b010),
+                rd: RegisterMapping::T0,
+                opcode: u7::new(0b000_0011),
             }
         );
         Ok(())

@@ -6,7 +6,7 @@ use crate::{
     instruction::Instruction,
     registers::{RegisterFile, RegisterMapping},
     signals::{control_unit, ALUControl, ALUSrcA, ALUSrcB, BranchJump, ControlSignals, PCSrc},
-    stages::{Immediate, EXMEM, IDEX, IF, IFID, MEMWB, WB},
+    stages::{Immediate, EXMEM, IDEX, IF, IFID, MEMWB},
 };
 
 /// a string that holds a report of what happened in the CPU during a clock cycle.
@@ -26,15 +26,16 @@ impl InstructionMemory {
         Self { rom }
     }
 
-    pub fn get_instruction(&self, pc: u32) -> u32 {
+    pub fn get_instruction(&self, pc: u32) -> Option<u32> {
         if pc as usize / 4 >= self.rom.len() {
-            panic!("PC out of bounds");
+            // we've reached the end of the program
+            return None;
         }
         if pc % 4 != 0 {
             panic!("PC not aligned to 4 bytes");
         }
 
-        self.rom[pc as usize / 4]
+        Some(self.rom[pc as usize / 4])
     }
 }
 
@@ -42,7 +43,7 @@ impl InstructionMemory {
 /// Each data is a 32-bit integer.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 pub struct DataMemory {
-    pub d_mem: [u32; 32],
+    d_mem: [u32; 32],
 }
 
 impl DataMemory {
@@ -186,8 +187,18 @@ impl CPU {
 
     /// the Decode stage of the CPU.
     fn decode(&mut self, ifid_reg: IFID) -> Result<IDEX> {
-        // Implement the Decode stage here
-        let instruction = Instruction::from_machine_code(ifid_reg.instruction_code)?;
+        // if the fetch stage failed, flush
+        let Some(instruction) = ifid_reg.instruction_code else {
+            return Ok(IDEX {
+                instruction: Instruction::Flush,
+                read_data_1: None,
+                read_data_2: None,
+                immediate: Immediate::None,
+            });
+        };
+
+        // decode the instruction
+        let instruction = Instruction::from_machine_code(instruction)?;
 
         // read the register file
         let read_data_1 = match instruction {
@@ -196,14 +207,16 @@ impl CPU {
             | Instruction::SType { rs1, .. }
             | Instruction::SBType { rs1, .. } => Some(self.rf.read(rs1)),
             Instruction::UType { .. } | Instruction::UJType { .. } => None,
+            Instruction::Flush => unreachable!(),
         };
         let read_data_2 = match instruction {
             Instruction::RType { rs2, .. }
             | Instruction::SType { rs2, .. }
             | Instruction::SBType { rs2, .. } => Some(self.rf.read(rs2)),
-            Instruction::IType { .. } | Instruction::UType { .. } | Instruction::UJType { .. } => {
+            Instruction::IType { .. } | Instruction::UType { .. } | Instruction::UJType { .. }  => {
                 None
             }
+            Instruction::Flush => unreachable!(),
         };
 
         // sign extend the immediate value
@@ -223,11 +236,11 @@ impl CPU {
             Instruction::UJType { imm, .. } => {
                 Immediate::JumpOffset((u32::from(imm) as i32) << (32 - 21) >> (32 - 21))
             }
-            Instruction::RType { .. } => Immediate::None,
+            Instruction::RType { .. } | Instruction::Flush => Immediate::None,
         };
 
         // set the control signals
-        self.control_signals = control_unit(instruction.opcode())?;
+        self.control_signals = control_unit(instruction.opcode().unwrap())?;
 
         Ok(IDEX {
             instruction,
@@ -241,6 +254,17 @@ impl CPU {
     ///
     /// TODO: branch and jump address handling
     fn execute(&mut self, idex_reg: IDEX) -> Result<EXMEM> {
+        // if the decode stage failed, flush
+        if idex_reg.instruction == Instruction::Flush {
+            return Ok(EXMEM {
+                instruction: Instruction::Flush,
+                alu_result: 0,
+                alu_zero: false,
+                read_data_2: None,
+            });
+        }
+
+
         // ALU control unit
         let alu_control = alu_control_unit(
             self.control_signals.alu_op,
@@ -309,16 +333,82 @@ impl CPU {
         })
     }
 
-    fn mem(&mut self, _exmem_reg: EXMEM) -> MEMWB {
+    /// the Memory stage of the CPU.
+    fn mem(&mut self, exmem_reg: EXMEM) -> MEMWB {
+        // if the execute stage failed, flush
+        if exmem_reg.instruction == Instruction::Flush {
+            return MEMWB {
+                instruction: Instruction::Flush,
+                alu_result: 0,
+                mem_read_data: None,
+            };
+        }
+
         // Implement the Memory stage here
 
-        todo!()
+        match (self.control_signals.mem_read, self.control_signals.mem_write) {
+            (true, false) => {
+                // load
+                let mem_read_data = self.d_mem.read(exmem_reg.alu_result);
+                MEMWB {
+                    instruction: exmem_reg.instruction,
+                    alu_result: exmem_reg.alu_result,
+                    mem_read_data: Some(mem_read_data),
+                }
+            }
+            (false, true) => {
+                // store
+                self.d_mem.write(exmem_reg.alu_result, exmem_reg.read_data_2.expect("no data to store"));
+                MEMWB {
+                    instruction: exmem_reg.instruction,
+                    alu_result: exmem_reg.alu_result,
+                    mem_read_data: None,
+                }
+            }
+            (false, false) => {
+                // no memory operation
+                MEMWB {
+                    instruction: exmem_reg.instruction,
+                    alu_result: exmem_reg.alu_result,
+                    mem_read_data: None,
+                }
+            }
+            (true,true) => panic!("invalid control signals for memory stage"),
+        }
     }
 
-    /// todo: if there's a jump, we need to store the return address in the register file
-    fn write_back(&mut self, _memwb_reg: MEMWB) -> WB {
-        // Implement the Write Back stage here
-        todo!()
+    /// the Write Back stage of the CPU.
+    fn write_back(&mut self, memwb_reg: MEMWB) -> String {
+        // if the memory stage failed, flush
+        if memwb_reg.instruction == Instruction::Flush {
+            return String::new();
+        }
+
+        match (self.control_signals.reg_write, memwb_reg.instruction.rd()) {
+            (true, Some(rd)) => {
+                // write to register file
+                match self.control_signals.mem_to_reg {
+                    true => {
+                        // write the memory read data to the register file
+                        self.rf.write(rd, memwb_reg.mem_read_data.expect("no data to write"));
+                        format!("{rd} is modified to 0x{:x}",memwb_reg.mem_read_data.expect("no data to write"))
+                    }
+                    false => {
+                        // write the ALU result to the register file
+                        self.rf.write(rd, memwb_reg.alu_result);
+                        format!("{rd} is modified to 0x{:x}",memwb_reg.alu_result)
+                    }
+                }
+            }
+            (true, None) => {
+                // no write to register file
+                String::new()
+            }
+            (false, _) => {
+                // no write to register file
+                String::new()
+            }
+        }
     }
 }
 
@@ -527,33 +617,32 @@ mod tests {
 
         let ifid = cpu.fetch(IF {});
 
-        assert_eq!(ifid.instruction_code, 0x00000013);
+        assert_eq!(ifid.instruction_code.unwrap(), 0x00000013);
         assert_eq!(cpu.pc, 0);
         assert_eq!(cpu.next_pc, 4);
 
         let ifid = cpu.fetch(IF {});
 
-        assert_eq!(ifid.instruction_code, 0x00000093);
+        assert_eq!(ifid.instruction_code.unwrap(), 0x00000093);
         assert_eq!(cpu.pc, 4);
         assert_eq!(cpu.next_pc, 8);
 
         let ifid = cpu.fetch(IF {});
 
-        assert_eq!(ifid.instruction_code, 0x00000073);
+        assert_eq!(ifid.instruction_code.unwrap(), 0x00000073);
         assert_eq!(cpu.pc, 8);
         assert_eq!(cpu.next_pc, 12);
 
         let ifid = cpu.fetch(IF {});
 
-        assert_eq!(ifid.instruction_code, 0x00000033);
+        assert_eq!(ifid.instruction_code.unwrap(), 0x00000033);
         assert_eq!(cpu.pc, 12);
         assert_eq!(cpu.next_pc, 16);
     }
 
     #[test]
-    #[ignore = "control unit not implemented"]
     fn test_cpu_decode() {
-        let rom = vec![0x00000013, 0x00000093, 0x00000073, 0x00000033];
+        let rom = vec![0x00000013];
         let mut cpu = CPU::new(rom);
 
         let ifid = cpu.fetch(IF {});
@@ -565,7 +654,7 @@ mod tests {
                 funct7: None,
                 shamt: None,
                 opcode: u7::new(0b0010011),
-                rd: RegisterMapping::Ra,
+                rd: RegisterMapping::Zero,
                 funct3: u3::new(0),
                 rs1: RegisterMapping::Zero,
                 imm: i12::new(0),
@@ -577,9 +666,8 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "control unit not implemented"]
     fn test_cpu_execute() {
-        let rom = vec![0x00000013, 0x00000093, 0x00000073, 0x00000033];
+        let rom = vec![0x00000013];
         let mut cpu = CPU::new(rom);
 
         let ifid = cpu.fetch(IF {});
@@ -592,7 +680,7 @@ mod tests {
                 funct7: None,
                 shamt: None,
                 opcode: u7::new(0b0010011),
-                rd: RegisterMapping::Ra,
+                rd: RegisterMapping::Zero,
                 funct3: u3::new(0),
                 rs1: RegisterMapping::Zero,
                 imm: i12::new(0),
@@ -604,42 +692,35 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "not implemented"]
     fn test_cpu_mem() {
-        let rom = vec![0x00000013, 0x00000093, 0x00000073, 0x00000033];
+        // this instruction will load the value at offset 4 from the address in register T2 into register T0
+        let rom = vec![0x0043_A283];
         let mut cpu = CPU::new(rom);
+
+        // put some data in the data memory
+        cpu.d_mem.write(0, 5);
+        cpu.d_mem.write(4, 10);
+        cpu.d_mem.write(8, 15);
 
         let ifid = cpu.fetch(IF {});
         let idex = cpu.decode(ifid).unwrap();
         let exmem = cpu.execute(idex).unwrap();
         let memwb = cpu.mem(exmem);
 
-        assert_eq!(
-            memwb.instruction,
-            Instruction::IType {
-                funct7: None,
-                shamt: None,
-                opcode: u7::new(0b0010011),
-                rd: RegisterMapping::Ra,
-                funct3: u3::new(0),
-                rs1: RegisterMapping::Zero,
-                imm: i12::new(0),
-            }
-        );
+        assert_eq!(memwb.mem_read_data, Some(10));
     }
 
     #[test]
-    #[ignore = "not implemented"]
     fn test_cpu_write_back() {
-        let rom = vec![0x00000013, 0x00000093, 0x00000073, 0x00000033];
+        let rom = vec![0b0000_0000_1010_0110_0111_0110_1001_0011];
         let mut cpu = CPU::new(rom);
 
         let ifid = cpu.fetch(IF {});
         let idex = cpu.decode(ifid).unwrap();
         let exmem = cpu.execute(idex).unwrap();
         let memwb = cpu.mem(exmem);
-        let wb = cpu.write_back(memwb);
+        cpu.write_back(memwb);
 
-        assert_eq!(wb, WB {});
+        assert_eq!(cpu.rf.read(RegisterMapping::A3), 10);
     }
 }

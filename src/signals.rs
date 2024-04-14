@@ -7,7 +7,7 @@ use ux::u7;
 /// A decent chunk of these are actually entirely unnessary for this implementation, but are included nonetheless for completeness.
 pub struct ControlSignals {
     /// tells the register file to write to the register specified by the instruction.
-    pub reg_write: Option<bool>,
+    pub reg_write: bool,
     /// The BranchJump signal is a 2 bit signal that tells the Branching and Jump Unit what type of branching to consider.
     pub branch_jump: BranchJump,
     /// The ALUSrcA signal is a 1 bit signal that tells the ALU whether to use the register value (0), the PC (1), or the constant 0 as the second operand.
@@ -17,11 +17,11 @@ pub struct ControlSignals {
     /// The ALU operation signal is a 2 bit signal that tells the ALU Control Unit what type of instruction is being executed.
     pub alu_op: ALUOp,
     /// The mem_write signal is a 1 bit signal that tells the data memory unit whether to write to memory.
-    pub mem_write: Option<bool>,
+    pub mem_write: bool,
     /// controls whether the write back stages uses the output of the data memory unit or the ALU.
-    pub mem_to_reg: Option<bool>,
+    pub mem_to_reg: bool,
     /// The mem_read signal is a 1 bit signal that tells the data memory unit whether to read from memory.
-    pub mem_read: Option<bool>,
+    pub mem_read: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
@@ -136,86 +136,86 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
 
         // jal
         0b1101111 => Ok(ControlSignals {
-            reg_write: Some(true),
+            reg_write: true,
             branch_jump: BranchJump::Jump,
             alu_src_a: ALUSrcA::PC,
             alu_src_b: ALUSrcB::Immediate,
             alu_op: ALUOp::ADD,
-            mem_write: None,
-            mem_to_reg: None,
-            mem_read: None,
+            mem_write: false,
+            mem_to_reg: false,
+            mem_read: false,
         }),
 
         // jalr
         0b1100111 => Ok(ControlSignals {
-            reg_write: Some(true),
+            reg_write: true,
             branch_jump: BranchJump::No,
             alu_src_a: ALUSrcA::Register,
             alu_src_b: ALUSrcB::Immediate,
             alu_op: ALUOp::ADD,
-            mem_write: None,
-            mem_to_reg: None,
-            mem_read: None,
+            mem_write: false,
+            mem_to_reg: false,
+            mem_read: false,
         }),
 
         // branch
         0b1100011 => Ok(ControlSignals {
-            reg_write: None,
+            reg_write: false,
             branch_jump: BranchJump::Branch,
             alu_src_a: ALUSrcA::PC,
             alu_src_b: ALUSrcB::Immediate,
             alu_op: ALUOp::BRANCH,
-            mem_write: None,
-            mem_to_reg: None,
-            mem_read: None,
+            mem_write: false,
+            mem_to_reg: false,
+            mem_read: false,
         }),
 
         // load
         0b0000011 => Ok(ControlSignals {
-            reg_write: Some(true),
+            reg_write: true,
             branch_jump: BranchJump::No,
             alu_src_a: ALUSrcA::PC,
             alu_src_b: ALUSrcB::Immediate,
             alu_op: ALUOp::ADD,
-            mem_write: None,
-            mem_to_reg: Some(true),
-            mem_read: Some(true),
+            mem_write: false,
+            mem_to_reg: true,
+            mem_read: true,
         }),
 
         // store
         0b0100011 => Ok(ControlSignals {
-            reg_write: None,
+            reg_write: false,
             branch_jump: BranchJump::No,
             alu_src_a: ALUSrcA::PC,
             alu_src_b: ALUSrcB::Immediate,
             alu_op: ALUOp::ADD,
-            mem_write: Some(true),
-            mem_to_reg: None,
-            mem_read: None,
+            mem_write: true,
+            mem_to_reg: false,
+            mem_read: false,
         }),
 
         // R-type
         0b0110011 => Ok(ControlSignals {
-            reg_write: Some(true),
+            reg_write: true,
             branch_jump: BranchJump::No,
             alu_src_a: ALUSrcA::Register,
             alu_src_b: ALUSrcB::Register,
             alu_op: ALUOp::FUNCT,
-            mem_write: None,
-            mem_to_reg: Some(true),
-            mem_read: None,
+            mem_write: false,
+            mem_to_reg: true,
+            mem_read: false,
         }),
 
         // I-type
         0b0010011 => Ok(ControlSignals {
-            reg_write: Some(true),
+            reg_write: true,
             branch_jump: BranchJump::No,
             alu_src_a: ALUSrcA::Register,
             alu_src_b: ALUSrcB::Immediate,
             alu_op: ALUOp::ADD,
-            mem_write: None,
-            mem_to_reg: Some(true),
-            mem_read: None,
+            mem_write: false,
+            mem_to_reg: false,
+            mem_read: false,
         }),
 
         _ => Err(anyhow::anyhow!("opcode not recognized")),

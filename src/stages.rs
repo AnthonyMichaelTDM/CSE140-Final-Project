@@ -18,7 +18,7 @@ pub struct IF {
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct IFID {
     // pub next_pc: u32,
-    pub instruction_code: u32,
+    pub instruction_code: Option<u32>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -51,17 +51,8 @@ pub struct EXMEM {
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct MEMWB {
     pub instruction: Instruction,
-    // pub next_pc: u32,
-    // pub alu_result: u32,
-    // pub read_data: u32,
-    // pub write_register: u4,
-    // pub write_data: u32,
-    // pub mem_to_reg: bool,
-    // pub reg_write: bool,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct WB {
+    pub mem_read_data: Option<u32>,
+    pub alu_result: u32,
     // pub next_pc: u32,
     // pub alu_result: u32,
     // pub read_data: u32,

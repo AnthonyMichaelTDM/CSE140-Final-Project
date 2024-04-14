@@ -115,6 +115,5 @@ impl RegisterFile {
 
     pub fn write(&mut self, reg: RegisterMapping, value: u32) {
         self.registers[reg as usize] = value;
-        println!("{reg} is modified to {value:x}");
     }
 }
