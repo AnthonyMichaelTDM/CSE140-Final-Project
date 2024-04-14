@@ -1,11 +1,11 @@
-use anyhow::Result;
-use ux::u4;
+use anyhow::{bail, Result};
+use ux::u3;
 
 use crate::{
     alu::{alu, alu_control_unit},
     instruction::Instruction,
     registers::{RegisterFile, RegisterMapping},
-    signals::{control_unit, ALUControl, ALUSrcA, ALUSrcB, ControlSignals, PCSrc},
+    signals::{control_unit, ALUControl, ALUSrcA, ALUSrcB, BranchJump, ControlSignals, PCSrc},
     stages::{Immediate, EXMEM, IDEX, IF, IFID, MEMWB, WB},
 };
 
@@ -86,6 +86,11 @@ pub struct CPU {
     /// The jump_target variable will be set to the target address of the jump instruction.
     /// This will be used as the PC value in the next cycle if a jump was taken.
     jump_target: Option<u32>,
+    /// The PCSrc signal is a 2 bit signal that tells the cpu where to get the next PC value from.
+    /// 00: PC + 4
+    /// 01: branch_target
+    /// 10: jump_target
+    pc_src: PCSrc,
     total_clock_cycles: u64,
     control_signals: ControlSignals,
     /// an integer array that has 32 entries.
@@ -126,6 +131,7 @@ impl CPU {
             rf: RegisterFile::new(),
             d_mem: DataMemory::new(),
             i_mem: InstructionMemory::new(rom),
+            pc_src: PCSrc::Next,
         }
     }
 
@@ -164,7 +170,7 @@ impl CPU {
     /// the Fetch stage of the CPU.
     fn fetch(&mut self, _if_reg: IF) -> IFID {
         // increment the program counter
-        self.pc = match self.control_signals.pc_src {
+        self.pc = match self.pc_src {
             PCSrc::Next => self.next_pc,
             PCSrc::BranchTarget => self.branch_target.unwrap(),
             PCSrc::JumpTarget => self.jump_target.unwrap(),
@@ -221,7 +227,7 @@ impl CPU {
         };
 
         // set the control signals
-        self.control_signals = control_unit(instruction.opcode());
+        self.control_signals = control_unit(instruction.opcode())?;
 
         Ok(IDEX {
             instruction,
@@ -253,7 +259,9 @@ impl CPU {
             ALUSrcB::Immediate => match idex_reg.immediate {
                 Immediate::SignedImmediate(imm) => imm as u32,
                 Immediate::AddressOffset(imm) => imm as u32,
-                Immediate::BranchOffset(imm) => imm as u32,
+                Immediate::BranchOffset(_) => {
+                    bail!("branch offset should not be used as ALU operand")
+                }
                 Immediate::JumpOffset(imm) => imm as u32,
                 Immediate::UpperImmediate(imm) => imm,
                 Immediate::None => 0,

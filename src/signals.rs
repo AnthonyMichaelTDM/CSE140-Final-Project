@@ -1,3 +1,4 @@
+use anyhow::Result;
 use ux::u7;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
@@ -7,8 +8,8 @@ use ux::u7;
 pub struct ControlSignals {
     /// tells the register file to write to the register specified by the instruction.
     pub reg_write: Option<bool>,
-    /// The branch signal is a 1 bit signal that controls whether a branch *can* be taken. (It is not the branch condition itself. That is determined by the ALU zero signal.)
-    pub branch: bool,
+    /// The BranchJump signal is a 2 bit signal that tells the Branching and Jump Unit what type of branching to consider.
+    pub branch_jump: BranchJump,
     /// The ALUSrcA signal is a 1 bit signal that tells the ALU whether to use the register value (0), the PC (1), or the constant 0 as the second operand.
     pub alu_src_a: ALUSrcA,
     /// The ALUSrcB signal is a 1 bit signal that tells the ALU whether to use the register value (0), the immediate value (1), or the constant 4 as the second operand.
@@ -21,11 +22,6 @@ pub struct ControlSignals {
     pub mem_to_reg: Option<bool>,
     /// The mem_read signal is a 1 bit signal that tells the data memory unit whether to read from memory.
     pub mem_read: Option<bool>,
-    /// The PCSrc signal is a 2 bit signal that tells the cpu where to get the next PC value from.
-    /// 00: PC + 4
-    /// 01: branch_target
-    /// 10: jump_target
-    pub pc_src: PCSrc,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
@@ -35,8 +31,9 @@ pub enum ALUOp {
     /// The ALU should perform an ADD operation, this is the case for memory load and store instructions.
     #[default]
     ADD = 0b00,
-    /// The ALU should perform a SUB operation, this is the case for branch instructions.
-    SUB = 0b01,
+    /// The ALU should perform an operation specified by the funct3 field of the instruction (which specifies the type of branching to perform).
+    /// This is the case for SB-type instructions.
+    BRANCH = 0b01,
     /// The ALU should perform an operation specified by the funct7 and funct3 fields of the instruction.
     /// This is the case for R-type and I-type instructions.
     FUNCT = 0b10,
@@ -86,12 +83,141 @@ pub enum PCSrc {
     #[default]
     /// The next PC value comes from PC + 4
     Next = 0b00,
-    /// The next PC value comes from the branch target address
+    /// The next PC value comes from the branch target address,
     BranchTarget = 0b01,
     /// The next PC value comes from the jump target address
     JumpTarget = 0b10,
 }
 
-pub fn control_unit(_opcode: u7) -> ControlSignals {
-    todo!()
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
+#[repr(u8)]
+/// a 2 bit control signal that tells the Branching and Jump Unit what type of branching to consider.
+pub enum BranchJump {
+    #[default]
+    No = 0b00,
+    Branch = 0b01,
+    Jump = 0b10,
+}
+
+/// Control Unit implementation
+///
+/// # Arguments
+///
+/// * `opcode` - the opcode of the instruction
+///
+/// # Returns
+///
+/// * `ControlSignals` - the control signals that the Control Unit generates
+///
+/// # Errors
+///
+/// * if the opcode is not recognized / not supported
+///
+/// # Description
+///
+/// the control unit considers 9 types of instructions:
+///
+/// 1. `lui` instruction
+/// 2. `auipc` instruction
+/// 3. `jal` instruction
+/// 4. `jalr` instruction
+/// 5. branch instructions
+/// 6. load instructions
+/// 7. store instructions
+/// 8. R-type instructions
+/// 9. I-type instructions
+pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
+    match u8::from(opcode) {
+        // lui
+        0b0110111 => Err(anyhow::anyhow!("lui instruction not supported yet")),
+
+        // auipc
+        0b0010111 => Err(anyhow::anyhow!("auipc instruction not supported yet")),
+
+        // jal
+        0b1101111 => Ok(ControlSignals {
+            reg_write: Some(true),
+            branch_jump: BranchJump::Jump,
+            alu_src_a: ALUSrcA::PC,
+            alu_src_b: ALUSrcB::Immediate,
+            alu_op: ALUOp::ADD,
+            mem_write: None,
+            mem_to_reg: None,
+            mem_read: None,
+        }),
+
+        // jalr
+        0b1100111 => Ok(ControlSignals {
+            reg_write: Some(true),
+            branch_jump: BranchJump::No,
+            alu_src_a: ALUSrcA::Register,
+            alu_src_b: ALUSrcB::Immediate,
+            alu_op: ALUOp::ADD,
+            mem_write: None,
+            mem_to_reg: None,
+            mem_read: None,
+        }),
+
+        // branch
+        0b1100011 => Ok(ControlSignals {
+            reg_write: None,
+            branch_jump: BranchJump::Branch,
+            alu_src_a: ALUSrcA::PC,
+            alu_src_b: ALUSrcB::Immediate,
+            alu_op: ALUOp::BRANCH,
+            mem_write: None,
+            mem_to_reg: None,
+            mem_read: None,
+        }),
+
+        // load
+        0b0000011 => Ok(ControlSignals {
+            reg_write: Some(true),
+            branch_jump: BranchJump::No,
+            alu_src_a: ALUSrcA::PC,
+            alu_src_b: ALUSrcB::Immediate,
+            alu_op: ALUOp::ADD,
+            mem_write: None,
+            mem_to_reg: Some(true),
+            mem_read: Some(true),
+        }),
+
+        // store
+        0b0100011 => Ok(ControlSignals {
+            reg_write: None,
+            branch_jump: BranchJump::No,
+            alu_src_a: ALUSrcA::PC,
+            alu_src_b: ALUSrcB::Immediate,
+            alu_op: ALUOp::ADD,
+            mem_write: Some(true),
+            mem_to_reg: None,
+            mem_read: None,
+        }),
+
+        // R-type
+        0b0110011 => Ok(ControlSignals {
+            reg_write: Some(true),
+            branch_jump: BranchJump::No,
+            alu_src_a: ALUSrcA::Register,
+            alu_src_b: ALUSrcB::Register,
+            alu_op: ALUOp::FUNCT,
+            mem_write: None,
+            mem_to_reg: Some(true),
+            mem_read: None,
+        }),
+
+        // I-type
+        0b0010011 => Ok(ControlSignals {
+            reg_write: Some(true),
+            branch_jump: BranchJump::No,
+            alu_src_a: ALUSrcA::Register,
+            alu_src_b: ALUSrcB::Immediate,
+            alu_op: ALUOp::ADD,
+            mem_write: None,
+            mem_to_reg: Some(true),
+            mem_read: None,
+        }),
+
+        _ => Err(anyhow::anyhow!("opcode not recognized")),
+    }
 }
