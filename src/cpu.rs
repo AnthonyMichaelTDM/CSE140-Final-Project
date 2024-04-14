@@ -271,9 +271,34 @@ impl CPU {
 
         let (alu_zero, alu_result) = alu(alu_control, alu_operand_a, alu_operand_b);
 
+        // signal used by the branch and jump unit to help it resolve the branch or jump instruction
+        let operands_equal = alu_operand_a == alu_operand_b;
+
         // branch and jump address calculation
-        if self.control_signals.branch && alu_zero {
-            self.branch_target = Some(alu_result);
+        match branching_jump_unit(
+            self.control_signals.branch_jump,
+            alu_zero,
+            alu_control,
+            operands_equal,
+            idex_reg.instruction.funct3(),
+        )? {
+            PCSrc::BranchTarget => {
+                let branch_offset = match idex_reg.immediate {
+                    Immediate::BranchOffset(offset) => offset,
+                    _ => return Err(anyhow::anyhow!("invalid immediate value")),
+                };
+                self.branch_target = Some(self.pc.wrapping_add_signed(branch_offset));
+                self.pc_src = PCSrc::BranchTarget;
+            }
+            PCSrc::JumpTarget => {
+                self.jump_target = Some(alu_result);
+                self.pc_src = PCSrc::JumpTarget;
+            }
+            PCSrc::Next => {
+                self.branch_target = None;
+                self.jump_target = None;
+                self.pc_src = PCSrc::Next;
+            }
         }
 
         Ok(EXMEM {
@@ -294,6 +319,134 @@ impl CPU {
     fn write_back(&mut self, _memwb_reg: MEMWB) -> WB {
         // Implement the Write Back stage here
         todo!()
+    }
+}
+
+/// The Branch and Jump Unit is responsible for determining whether a branch or jump should be taken.
+///
+/// # Arguments
+///
+/// * `branch_jump` - a 2 bit control signal that tells the Branching and Jump Unit what type of branching to consider.
+/// * `alu_zero` - a signal that tells the Branching and Jump Unit whether the ALU result is zero.
+/// * `alu_control` - the operation that the ALU performed.
+/// * `operands_equal` - a signal that tells the Branching and Jump Unit whether the operands to the alu were are equal.
+/// * `funct3` - the funct3 field of the instruction (only for branch instructions)
+///
+/// # Returns
+///
+/// * `Ok(None)` - if no branch or jump should be taken
+/// * `Ok(Some((u32, PCSrc)))` - the target address and the source of the next PC value (which also determines where the returned target address should be stored)
+/// * `Err(anyhow::Error)` - if the arguments are invalid or the operation is not supported
+fn branching_jump_unit(
+    branch_jump: BranchJump,
+    alu_zero: bool,
+    alu_control: ALUControl,
+    operands_equal: bool,
+    funct3: Option<u3>,
+) -> Result<PCSrc> {
+    match branch_jump {
+        BranchJump::No => Ok(PCSrc::Next),
+        BranchJump::Branch => {
+            // branch instructions have a funct3 field
+            let funct3 = u8::from(funct3.ok_or_else(|| {
+                anyhow::anyhow!("funct3 field is required for branch instructions")
+            })?);
+
+            // first, we need to check the type of branch instruction being done, we can use the ALU Control Signal to determine this
+            // then we do some logic based on the func3 field of the instruction
+            match (alu_control, funct3, alu_zero, operands_equal) {
+                // take branch:
+                (
+                    // beq
+                    ALUControl::SUB,
+                    0b000,
+                    true,
+                    true,
+                )
+                | // bne
+                (
+                    ALUControl::SUB,
+                    0b001,
+                    false,
+                    false,
+                )
+                | (
+                    // blt
+                    ALUControl::SLT,
+                    0b100,
+                    true,
+                    false,
+                )
+                | (
+                    // bge
+                    ALUControl::SLT,
+                    0b101,
+                    false,
+                    _,
+                )
+                | (
+                    // bltu
+                    ALUControl::SLTU,
+                    0b110,
+                    true,
+                    false,
+                )
+                | (
+                    // bgeu
+                    ALUControl::SLTU,
+                    0b111,
+                    false,
+                    _,
+                ) => Ok(PCSrc::BranchTarget),
+
+                // don't take branch
+                (
+                    // beq
+                    ALUControl::SUB,
+                    0b000,
+                    false,
+                    false,
+                )
+                | // bne
+                (  
+                    ALUControl::SUB,
+                    0b001,
+                    true,
+                    true,
+                )
+                | (
+                    // blt
+                    ALUControl::SLT,
+                    0b100,
+                    false,
+                    _,
+                )
+                | (
+                    // bge
+                    ALUControl::SLT,
+                    0b101,
+                    true,
+                    true,
+                )
+                | (
+                    // bltu
+                    ALUControl::SLTU,
+                    0b110,
+                    false,
+                    _,
+                )
+                | (
+                    // bgeu
+                    ALUControl::SLTU,
+                    0b111,
+                    true,
+                    true,
+                ) => Ok(PCSrc::Next),
+
+                _ => bail!("invalid branch instruction"),
+            }
+        }
+        BranchJump::Jump => Ok(PCSrc::JumpTarget),
     }
 }
 

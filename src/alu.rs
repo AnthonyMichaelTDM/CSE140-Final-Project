@@ -51,6 +51,8 @@ use crate::signals::{ALUControl, ALUOp};
 ///     end
 /// endmodule
 /// ```
+///
+/// but it is extended to handle various branch instructions.
 pub fn alu_control_unit(
     alu_op: ALUOp,
     funct3: Option<u3>,
@@ -58,7 +60,15 @@ pub fn alu_control_unit(
 ) -> Result<ALUControl> {
     Ok(match (alu_op, funct3.map(u8::from), funct7.map(u8::from)) {
         (ALUOp::ADD, _, _) => ALUControl::ADD,
-        (ALUOp::SUB, _, _) => ALUControl::SUB,
+        (ALUOp::BRANCH, Some(funct3), _) => match funct3 {
+            0b000 => ALUControl::SUB,  // beq
+            0b001 => ALUControl::SUB,  // bne
+            0b100 => ALUControl::SLT,  // blt
+            0b101 => ALUControl::SLT,  // bge
+            0b110 => ALUControl::SLTU, // bltu
+            0b111 => ALUControl::SLTU, // bgeu
+            _ => unreachable!("every 3 bit integer is covered in the above"),
+        },
         (ALUOp::FUNCT, Some(funct3), Some(funct7)) => match (funct7, funct3) {
             (0b0000000, 0b000) => ALUControl::ADD,  // add
             (0b0100000, 0b000) => ALUControl::SUB,  // sub
