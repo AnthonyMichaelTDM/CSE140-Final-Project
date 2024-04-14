@@ -49,7 +49,7 @@ pub enum RegisterMapping {
 
 impl fmt::Display for RegisterMapping {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "x{:02}", *self as u8)
+        write!(f, "x{}", *self as u8)
     }
 }
 

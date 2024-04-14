@@ -140,6 +140,12 @@ impl CPU {
         self.rf.initialize(mappings);
     }
 
+    pub fn initialize_dmem(&mut self, data: &[(u32, u32)]) {
+        for (address, value) in data {
+            self.d_mem.write(*address, *value);
+        }
+    }
+
     pub fn get_total_clock_cycles(&self) -> u64 {
         self.total_clock_cycles
     }
@@ -172,7 +178,7 @@ impl CPU {
 
         self.total_clock_cycles += 1;
 
-        report.push_str(format!("total_clock_cycles {} :", self.total_clock_cycles).as_str());
+        report.push_str(format!("total_clock_cycles {} :\n", self.total_clock_cycles).as_str());
 
         let ifid = self.fetch(IF {});
         let idex = self.decode(ifid)?;
@@ -183,6 +189,13 @@ impl CPU {
         let wb_report = self.write_back(memwb);
         // wb will tell us if registers were updated, so we add those to the report
         report.push_str(&wb_report);
+
+        // report pc modification
+        report.push_str(format!("pc is modified to 0x{:x}\n", match self.pc_src {
+            PCSrc::Next => self.next_pc,
+            PCSrc::BranchTarget => self.branch_target.unwrap(),
+            PCSrc::JumpTarget => self.jump_target.unwrap(),
+        }).as_str());
 
         Ok(report)
     }
@@ -244,7 +257,7 @@ impl CPU {
                 Immediate::SignedImmediate(i32::from(imm) << (32 - 12) >> (32 - 12))
             }
             Instruction::SType { imm, .. } => {
-                Immediate::AddressOffset(i32::from(imm) << (32 - 12) >> (32 - 12))
+                Immediate::SignedImmediate(i32::from(imm) << (32 - 12) >> (32 - 12))
             }
             Instruction::SBType { imm, .. } => {
                 Immediate::BranchOffset(i32::from(imm) << (32 - 13) >> (32 - 13))
@@ -301,7 +314,6 @@ impl CPU {
             ALUSrcB::Register => idex_reg.read_data_2.unwrap(), // TODO: data forwarding
             ALUSrcB::Immediate => match idex_reg.immediate {
                 Immediate::SignedImmediate(imm) => imm as u32,
-                Immediate::AddressOffset(imm) => imm as u32,
                 Immediate::BranchOffset(_) => {
                     bail!("branch offset should not be used as ALU operand")
                 }
@@ -328,7 +340,7 @@ impl CPU {
             PCSrc::BranchTarget => {
                 let branch_offset = match idex_reg.immediate {
                     Immediate::BranchOffset(offset) => offset,
-                    _ => return Err(anyhow::anyhow!("invalid immediate value")),
+                    _ => return Err(anyhow::anyhow!("invalid immediate value\n")),
                 };
                 self.branch_target = Some(self.pc.wrapping_add_signed(branch_offset));
                 self.pc_src = PCSrc::BranchTarget;
@@ -385,7 +397,7 @@ impl CPU {
                     alu_result: exmem_reg.alu_result,
                     mem_read_data: None,
                 },
-                format!("memory 0x{:x} is modified to 0x{:x}",exmem_reg.alu_result,exmem_reg.read_data_2.expect("no data to store"))
+                format!("memory 0x{:x} is modified to 0x{:x}\n",exmem_reg.alu_result,exmem_reg.read_data_2.expect("no data to store"))
                 )
             }
             (false, false) => {
@@ -414,12 +426,12 @@ impl CPU {
                     true => {
                         // write the memory read data to the register file
                         self.rf.write(rd, memwb_reg.mem_read_data.expect("no data to write"));
-                        format!("{rd} is modified to 0x{:x}",memwb_reg.mem_read_data.expect("no data to write"))
+                        format!("{rd} is modified to 0x{:x}\n",memwb_reg.mem_read_data.expect("no data to write"))
                     }
                     false => {
                         // write the ALU result to the register file
                         self.rf.write(rd, memwb_reg.alu_result);
-                        format!("{rd} is modified to 0x{:x}",memwb_reg.alu_result)
+                        format!("{rd} is modified to 0x{:x}\n",memwb_reg.alu_result)
                     }
                 }
             }

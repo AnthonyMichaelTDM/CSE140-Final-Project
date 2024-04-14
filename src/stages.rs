@@ -64,10 +64,8 @@ pub struct MEMWB {
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Immediate {
-    /// for I-type instructions
+    /// for I-type and S-type instructions
     SignedImmediate(i32),
-    /// for S-type instructions
-    AddressOffset(i32),
     /// for U-type instructions
     UpperImmediate(u32),
     /// for SB-type instructions

@@ -162,8 +162,8 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
         0b1100011 => Ok(ControlSignals {
             reg_write: false,
             branch_jump: BranchJump::Branch,
-            alu_src_a: ALUSrcA::PC,
-            alu_src_b: ALUSrcB::Immediate,
+            alu_src_a: ALUSrcA::Register,
+            alu_src_b: ALUSrcB::Register,
             alu_op: ALUOp::BRANCH,
             mem_write: false,
             mem_to_reg: false,
@@ -174,7 +174,7 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
         0b0000011 => Ok(ControlSignals {
             reg_write: true,
             branch_jump: BranchJump::No,
-            alu_src_a: ALUSrcA::PC,
+            alu_src_a: ALUSrcA::Register,
             alu_src_b: ALUSrcB::Immediate,
             alu_op: ALUOp::ADD,
             mem_write: false,
@@ -186,7 +186,7 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
         0b0100011 => Ok(ControlSignals {
             reg_write: false,
             branch_jump: BranchJump::No,
-            alu_src_a: ALUSrcA::PC,
+            alu_src_a: ALUSrcA::Register,
             alu_src_b: ALUSrcB::Immediate,
             alu_op: ALUOp::ADD,
             mem_write: true,
@@ -202,7 +202,7 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
             alu_src_b: ALUSrcB::Register,
             alu_op: ALUOp::FUNCT,
             mem_write: false,
-            mem_to_reg: true,
+            mem_to_reg: false,
             mem_read: false,
         }),
 
@@ -212,7 +212,7 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
             branch_jump: BranchJump::No,
             alu_src_a: ALUSrcA::Register,
             alu_src_b: ALUSrcB::Immediate,
-            alu_op: ALUOp::ADD,
+            alu_op: ALUOp::FUNCT,
             mem_write: false,
             mem_to_reg: false,
             mem_read: false,
