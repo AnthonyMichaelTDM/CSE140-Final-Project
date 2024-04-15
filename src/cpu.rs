@@ -319,7 +319,7 @@ impl CPU {
                 }
                 Immediate::JumpOffset(imm) => imm as u32,
                 Immediate::UpperImmediate(imm) => imm,
-                Immediate::None => 0,
+                Immediate::None => bail!("no immediate value found"),
             },
             ALUSrcB::Constant4 => 4,
         };
@@ -375,8 +375,6 @@ impl CPU {
             }, String::new());
         }
 
-        // Implement the Memory stage here
-
         match (self.control_signals.mem_read, self.control_signals.mem_write) {
             (true, false) => {
                 // load
@@ -422,17 +420,22 @@ impl CPU {
         match (self.control_signals.reg_write, memwb_reg.instruction.rd()) {
             (true, Some(rd)) => {
                 // write to register file
-                match self.control_signals.mem_to_reg {
-                    true => {
-                        // write the memory read data to the register file
-                        self.rf.write(rd, memwb_reg.mem_read_data.expect("no data to write"));
-                        format!("{rd} is modified to 0x{:x}\n",memwb_reg.mem_read_data.expect("no data to write"))
-                    }
-                    false => {
+                match self.control_signals.wb_src {
+                    crate::signals::WriteBackSrc::NA => String::new(),
+                    crate::signals::WriteBackSrc::ALU => {
                         // write the ALU result to the register file
                         self.rf.write(rd, memwb_reg.alu_result);
-                        format!("{rd} is modified to 0x{:x}\n",memwb_reg.alu_result)
-                    }
+                        format!("{} is modified to 0x{:x}\n", rd,memwb_reg.alu_result)
+                    },
+                    crate::signals::WriteBackSrc::Mem => {
+                        // write the memory read data to the register file
+                        self.rf.write(rd, memwb_reg.mem_read_data.expect("no data to write"));
+                        format!("{} is modified to 0x{:x}\n", rd,memwb_reg.mem_read_data.expect("no data to write"))
+                    },
+                    crate::signals::WriteBackSrc::PC => {
+                        self.rf.write(rd, self.next_pc);
+                        format!("{} is modified to 0x{:x}\n", rd,self.next_pc)
+                    },
                 }
             }
             (true, None) => {
@@ -571,7 +574,7 @@ fn branching_jump_unit(
                 _ => bail!("invalid branch instruction"),
             }
         }
-        BranchJump::Jump => Ok(PCSrc::JumpTarget),
+        BranchJump::Jal => Ok(PCSrc::JumpTarget),
     }
 }
 
@@ -747,8 +750,12 @@ mod tests {
 
     #[test]
     fn test_cpu_write_back() {
-        let rom = vec![0b0000_0000_1010_0110_0111_0110_1001_0011];
+        // this instruction will load the value at offset 4 from the address in register T2 into register T0
+        let rom = vec![0x0043_A283];
         let mut cpu = CPU::new(rom);
+
+        // put some data in the data memory
+        cpu.d_mem.write(4, 10);
 
         let ifid = cpu.fetch(IF {});
         let idex = cpu.decode(ifid).unwrap();
@@ -756,6 +763,6 @@ mod tests {
         let (memwb, _) = cpu.mem(exmem);
         cpu.write_back(memwb);
 
-        assert_eq!(cpu.rf.read(RegisterMapping::A3), 10);
+        assert_eq!(cpu.rf.read(RegisterMapping::T0), 10);
     }
 }

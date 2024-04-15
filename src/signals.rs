@@ -18,8 +18,8 @@ pub struct ControlSignals {
     pub alu_op: ALUOp,
     /// The mem_write signal is a 1 bit signal that tells the data memory unit whether to write to memory.
     pub mem_write: bool,
-    /// controls whether the write back stages uses the output of the data memory unit or the ALU.
-    pub mem_to_reg: bool,
+    /// controls what source the write back stages uses.
+    pub wb_src: WriteBackSrc,
     /// The mem_read signal is a 1 bit signal that tells the data memory unit whether to read from memory.
     pub mem_read: bool,
 }
@@ -96,7 +96,18 @@ pub enum BranchJump {
     #[default]
     No = 0b00,
     Branch = 0b01,
-    Jump = 0b10,
+    Jal = 0b10,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
+#[repr(u8)]
+/// a 2 bit control signal that tells the WB stage what source to write back to the register file.
+pub enum WriteBackSrc {
+    #[default]
+    NA = 0b00,
+    ALU = 0b01,
+    Mem = 0b10,
+    PC = 0b11,
 }
 
 /// Control Unit implementation
@@ -137,24 +148,24 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
         // jal
         0b1101111 => Ok(ControlSignals {
             reg_write: true,
-            branch_jump: BranchJump::Jump,
+            branch_jump: BranchJump::Jal,
             alu_src_a: ALUSrcA::PC,
             alu_src_b: ALUSrcB::Immediate,
             alu_op: ALUOp::ADD,
             mem_write: false,
-            mem_to_reg: false,
+            wb_src: WriteBackSrc::PC,
             mem_read: false,
         }),
 
         // jalr
         0b1100111 => Ok(ControlSignals {
             reg_write: true,
-            branch_jump: BranchJump::No,
+            branch_jump: BranchJump::Jal,
             alu_src_a: ALUSrcA::Register,
             alu_src_b: ALUSrcB::Immediate,
             alu_op: ALUOp::ADD,
             mem_write: false,
-            mem_to_reg: false,
+            wb_src: WriteBackSrc::PC,
             mem_read: false,
         }),
 
@@ -166,7 +177,7 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
             alu_src_b: ALUSrcB::Register,
             alu_op: ALUOp::BRANCH,
             mem_write: false,
-            mem_to_reg: false,
+            wb_src: WriteBackSrc::NA,
             mem_read: false,
         }),
 
@@ -178,7 +189,7 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
             alu_src_b: ALUSrcB::Immediate,
             alu_op: ALUOp::ADD,
             mem_write: false,
-            mem_to_reg: true,
+            wb_src: WriteBackSrc::Mem,
             mem_read: true,
         }),
 
@@ -190,7 +201,7 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
             alu_src_b: ALUSrcB::Immediate,
             alu_op: ALUOp::ADD,
             mem_write: true,
-            mem_to_reg: false,
+            wb_src: WriteBackSrc::NA,
             mem_read: false,
         }),
 
@@ -202,7 +213,7 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
             alu_src_b: ALUSrcB::Register,
             alu_op: ALUOp::FUNCT,
             mem_write: false,
-            mem_to_reg: false,
+            wb_src: WriteBackSrc::ALU,
             mem_read: false,
         }),
 
@@ -214,7 +225,7 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
             alu_src_b: ALUSrcB::Immediate,
             alu_op: ALUOp::FUNCT,
             mem_write: false,
-            mem_to_reg: false,
+            wb_src: WriteBackSrc::ALU,
             mem_read: false,
         }),
 
