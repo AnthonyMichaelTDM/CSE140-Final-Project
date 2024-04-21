@@ -1,5 +1,6 @@
 pub mod alu;
 pub mod cpu;
+mod hazard_detection;
 pub mod instruction;
 pub mod registers;
 pub mod signals;
@@ -107,28 +108,41 @@ mod tests {
         cpu.initialize_rf(&sample1_rf());
         cpu.initialize_dmem(&sample1_dmem());
 
+        assert_eq!("total_clock_cycles 1 :\n", cpu.run_step()?);
         assert_eq!(
-            "total_clock_cycles 1 :\nx3 is modified to 0x10\npc is modified to 0x4\n",
+            "total_clock_cycles 2 :\npc is modified to 0x4\n",
             cpu.run_step()?
         );
         assert_eq!(
-            "total_clock_cycles 2 :\nx5 is modified to 0x1b\npc is modified to 0x8\n",
+            "total_clock_cycles 3 :\npc is modified to 0x8\n",
             cpu.run_step()?
         );
         assert_eq!(
-            "total_clock_cycles 3 :\npc is modified to 0xc\n",
+            "total_clock_cycles 4 :\npc is modified to 0xc\n",
             cpu.run_step()?
         );
         assert_eq!(
-            "total_clock_cycles 4 :\nx5 is modified to 0x2b\npc is modified to 0x10\n",
+            "total_clock_cycles 5 :\nx3 is modified to 0x10\npc is modified to 0x10\n",
             cpu.run_step()?
         );
         assert_eq!(
-            "total_clock_cycles 5 :\nx5 is modified to 0x2f\npc is modified to 0x14\n",
+            "total_clock_cycles 6 :\nx5 is modified to 0x1b\npc is modified to 0x14\n",
             cpu.run_step()?
         );
         assert_eq!(
-            "total_clock_cycles 6 :\nmemory 0x70 is modified to 0x2f\npc is modified to 0x18\n",
+            "total_clock_cycles 7 :\npc is modified to 0x18\n",
+            cpu.run_step()?
+        );
+        assert_eq!(
+            "total_clock_cycles 8 :\nx5 is modified to 0x2b\npc is modified to 0x1c\n",
+            cpu.run_step()?
+        );
+        assert_eq!(
+            "total_clock_cycles 9 :\nmemory 0x70 is modified to 0x2f\nx5 is modified to 0x2f\npc is modified to 0x20\n",
+            cpu.run_step()?
+        );
+        assert_eq!(
+            "total_clock_cycles 10 :\npc is modified to 0x24\n",
             cpu.run_step()?
         );
 
