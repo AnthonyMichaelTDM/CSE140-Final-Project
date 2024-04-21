@@ -68,6 +68,8 @@ pub enum IDEX {
     #[default]
     /// used to flush the pipeline.
     Flush,
+    /// used to indicate a stall in the pipeline.
+    Stall,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]

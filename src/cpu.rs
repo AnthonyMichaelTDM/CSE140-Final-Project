@@ -1,12 +1,13 @@
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use ux::u3;
 
 use crate::{
     alu::{alu, alu_control_unit},
+    hazard_detection::{forwarding_unit, ForwardA, ForwardB, HazardDetectionUnit},
     instruction::Instruction,
     registers::{RegisterFile, RegisterMapping},
-    signals::{control_unit, ALUControl, ALUSrcA, ALUSrcB, BranchJump, ControlSignals, PCSrc},
-    stages::{Immediate, EXMEM, IDEX, IF, IFID, MEMWB},
+    signals::{control_unit, ALUControl, ALUSrcA, ALUSrcB, BranchJump, PCSrc},
+    stages::{Immediate, StageRegisters, EXMEM, IDEX, IF, IFID, MEMWB, WB},
 };
 
 /// a string that holds a report of what happened in the CPU during a clock cycle.
@@ -159,8 +160,9 @@ impl CPU {
                 }
             }
 
-            // if all the stage registers are flushed, we can stop the simulation
-            todo!()
+            if let IF::Flush = self.stage_registers.if_stage {
+                break;
+            }
         }
 
         println!("program terminated:");
@@ -175,75 +177,104 @@ impl CPU {
 
         report.push_str(format!("total_clock_cycles {} :\n", self.total_clock_cycles).as_str());
 
-        let ifid = self.fetch(IF {});
-        let idex = self.decode(ifid)?;
-        let exmem = self.execute(idex)?;
-        let (memwb, mem_report) = self.mem(exmem);
+        let wb_report = self.write_back();
+        let mem_report = self.mem();
+        self.execute()?;
+        self.decode()?;
+        let if_report = self.fetch();
+
         // mem will tell us if data memory was updated, so we add that to the report
         report.push_str(&mem_report);
-        let wb_report = self.write_back(memwb);
         // wb will tell us if registers were updated, so we add those to the report
         report.push_str(&wb_report);
-
-        // report pc modification
-        report.push_str(format!("pc is modified to 0x{:x}\n", match self.pc_src {
-            PCSrc::Next => self.next_pc,
-            PCSrc::BranchTarget => self.branch_target.unwrap(),
-            PCSrc::JumpTarget => self.jump_target.unwrap(),
-        }).as_str());
+        // if will tell us if the pc was updated, so we add that to the report
+        report.push_str(&if_report);
 
         Ok(report)
     }
 
     /// the Fetch stage of the CPU.
-    fn fetch(&mut self, _if_reg: IF) -> IFID {
+    fn fetch(&mut self) -> String {
+        // check if the decode stage indicates a stall
+        if let IDEX::Stall = self.stage_registers.idex {
+            // in this case, we don't need to do anything in the fetch stage
+            return String::from("pipeline stalled in the decode stage\n");
+        }
+
         // increment the program counter
-        self.pc = match self.pc_src {
-            PCSrc::Next => self.next_pc,
-            PCSrc::BranchTarget => self.branch_target.unwrap(),
-            PCSrc::JumpTarget => self.jump_target.unwrap(),
+        let report = match self.stage_registers.if_stage {
+            IF::Wb { pc_src } => {
+                self.pc = pc_src.next(self.pc);
+                format!("pc is modified to 0x{:x}\n", self.pc)
+            }
+            IF::Init => {
+                self.pc = 0;
+                self.stage_registers.if_stage = IF::Wb {
+                    pc_src: PCSrc::Next,
+                };
+                String::new()
+            }
+            IF::Flush => {
+                self.stage_registers.ifid = IFID::Flush;
+                return String::new();
+            }
         };
 
         // get the current instruction from the ROM
-        let instruction_code = self.i_mem.get_instruction(self.pc);
+        let Some(instruction_code) = self.i_mem.get_instruction(self.pc) else {
+            self.stage_registers.if_stage = IF::Flush;
+            self.stage_registers.ifid = IFID::Flush;
+            return report;
+        };
 
-        self.next_pc = self.pc + 4;
-
-        IFID { instruction_code }
+        self.stage_registers.ifid = IFID::If {
+            instruction_code,
+            pc: self.pc,
+        };
+        report
     }
 
     /// the Decode stage of the CPU.
-    fn decode(&mut self, ifid_reg: IFID) -> Result<IDEX> {
+    fn decode(&mut self) -> Result<()> {
         // if the fetch stage failed, flush
-        let Some(instruction) = ifid_reg.instruction_code else {
-            return Ok(IDEX {
-                instruction: Instruction::Flush,
-                read_data_1: None,
-                read_data_2: None,
-                immediate: Immediate::None,
-            });
+        let (instruction_code, pc) = match self.stage_registers.ifid {
+            IFID::Flush => {
+                self.stage_registers.idex = IDEX::Flush;
+                return Ok(());
+            }
+            IFID::If {
+                instruction_code,
+                pc,
+            } => (instruction_code, pc),
         };
 
         // decode the instruction
-        let instruction = Instruction::from_machine_code(instruction)?;
+        let instruction = Instruction::from_machine_code(instruction_code)?;
+
+        // check for a load hazard
+        let stall_required = HazardDetectionUnit::prime(instruction, self.stage_registers.idex)
+            .detect_stall_conditions();
+
+        if stall_required {
+            self.stage_registers.idex = IDEX::Stall;
+            return Ok(());
+        }
 
         // read the register file
-        let read_data_1 = match instruction {
+        let (rs1, read_data_1) = match instruction {
             Instruction::RType { rs1, .. }
             | Instruction::IType { rs1, .. }
             | Instruction::SType { rs1, .. }
-            | Instruction::SBType { rs1, .. } => Some(self.rf.read(rs1)),
-            Instruction::UType { .. } | Instruction::UJType { .. } => None,
-            Instruction::Flush => unreachable!(),
+            | Instruction::SBType { rs1, .. } => (Some(rs1), Some(self.rf.read(rs1))),
+            Instruction::UType { .. } | Instruction::UJType { .. } => (None, None),
         };
-        let read_data_2 = match instruction {
+        let (rs2, read_data_2) = match instruction {
             Instruction::RType { rs2, .. }
             | Instruction::SType { rs2, .. }
-            | Instruction::SBType { rs2, .. } => Some(self.rf.read(rs2)),
-            Instruction::IType { .. } | Instruction::UType { .. } | Instruction::UJType { .. }  => {
-                None
+            | Instruction::SBType { rs2, .. } => (Some(rs2), Some(self.rf.read(rs2))),
+            Instruction::IType { .. } | Instruction::UType { .. } | Instruction::UJType { .. } => {
+                (None, None)
             }
-            Instruction::Flush => unreachable!(),
         };
 
         // sign extend the immediate value
@@ -263,51 +294,101 @@ impl CPU {
             Instruction::UJType { imm, .. } => {
                 Immediate::JumpOffset((u32::from(imm) as i32) << (32 - 21) >> (32 - 21))
             }
-            Instruction::RType { .. } | Instruction::Flush => Immediate::None,
+            Instruction::RType { .. } => Immediate::None,
         };
 
         // set the control signals
-        self.control_signals = control_unit(instruction.opcode().unwrap())?;
+        let control_signals = control_unit(instruction.opcode().unwrap())?;
 
-        Ok(IDEX {
+        self.stage_registers.idex = IDEX::Id {
             instruction,
+            rs1,
             read_data_1,
+            rs2,
             read_data_2,
             immediate,
-        })
+            pc,
+            control_signals,
+        };
+
+        Ok(())
     }
 
     /// the Execute stage of the CPU.
     ///
     /// TODO: branch and jump address handling
-    fn execute(&mut self, idex_reg: IDEX) -> Result<EXMEM> {
+    fn execute(&mut self) -> Result<()> {
         // if the decode stage failed, flush
-        if idex_reg.instruction == Instruction::Flush {
-            return Ok(EXMEM {
-                instruction: Instruction::Flush,
-                alu_result: 0,
-                alu_zero: false,
-                read_data_2: None,
-            });
-        }
+        let (instruction, read_data_1, read_data_2, immediate, pc, control_signals) =
+            match self.stage_registers.idex {
+                IDEX::Flush | IDEX::Stall => {
+                    self.stage_registers.exmem = EXMEM::Flush;
 
+                    return Ok(());
+                }
+                IDEX::Id {
+                    instruction,
+                    read_data_1,
+                    read_data_2,
+                    immediate,
+                    pc,
+                    control_signals,
+                    ..
+                } => (
+                    instruction,
+                    read_data_1,
+                    read_data_2,
+                    immediate,
+                    pc,
+                    control_signals,
+                ),
+            };
 
         // ALU control unit
         let alu_control = alu_control_unit(
-            self.control_signals.alu_op,
-            idex_reg.instruction.funct3(),
-            idex_reg.instruction.funct7(),
+            control_signals.alu_op,
+            instruction.funct3(),
+            instruction.funct7(),
         )?;
 
+        // forwarding unit
+        let (forward_a, forward_b) = forwarding_unit(
+            self.stage_registers.exmem,
+            self.stage_registers.wb_stage,
+            self.stage_registers.idex,
+        );
+
         // ALU operation
-        let alu_operand_a: u32 = match self.control_signals.alu_src_a {
-            ALUSrcA::Register => idex_reg.read_data_1.unwrap(), // TODO: data forwarding
-            ALUSrcA::PC => self.pc,
+        let alu_operand_a: u32 = match control_signals.alu_src_a {
+            ALUSrcA::Register => match (
+                forward_a,
+                self.stage_registers.exmem,
+                self.stage_registers.wb_stage,
+            ) {
+                (ForwardA::None, _, _) => read_data_1.unwrap(),
+                (ForwardA::EXMEM, EXMEM::Ex { alu_result, .. }, _) => alu_result,
+                (ForwardA::MEMWB, _, WB::Mem { wb_data, .. }) => {
+                    wb_data.ok_or(anyhow!("no data to forward"))?
+                }
+                _ => read_data_1.unwrap(),
+            },
+            ALUSrcA::PC => pc,
             ALUSrcA::Constant0 => 0,
         };
-        let alu_operand_b: u32 = match self.control_signals.alu_src_b {
-            ALUSrcB::Register => idex_reg.read_data_2.unwrap(), // TODO: data forwarding
-            ALUSrcB::Immediate => match idex_reg.immediate {
+        let alu_operand_b: u32 = match control_signals.alu_src_b {
+            ALUSrcB::Register => match (
+                forward_b,
+                self.stage_registers.exmem,
+                self.stage_registers.wb_stage,
+            ) {
+                (ForwardB::None, _, _) => read_data_2.unwrap(),
+                (ForwardB::EXMEM, EXMEM::Ex { alu_result, .. }, _) => alu_result,
+                (ForwardB::MEMWB, _, WB::Mem { wb_data, .. }) => {
+                    wb_data.ok_or(anyhow!("no data to forward"))?
+                }
+                _ => read_data_2.unwrap(),
+            },
+            ALUSrcB::Immediate => match immediate {
                 Immediate::SignedImmediate(imm) => imm as u32,
                 Immediate::BranchOffset(_) => {
                     bail!("branch offset should not be used as ALU operand")
@@ -325,112 +406,180 @@ impl CPU {
         let operands_equal = alu_operand_a == alu_operand_b;
 
         // branch and jump address calculation
-        match branching_jump_unit(
-            self.control_signals.branch_jump,
-            alu_zero,
+        let pc_src = branching_jump_unit(
+            control_signals.branch_jump,
             alu_control,
-            operands_equal,
-            idex_reg.instruction.funct3(),
-        )? {
-            PCSrc::BranchTarget => {
-                let branch_offset = match idex_reg.immediate {
-                    Immediate::BranchOffset(offset) => offset,
-                    _ => return Err(anyhow::anyhow!("invalid immediate value\n")),
-                };
-                self.branch_target = Some(self.pc.wrapping_add_signed(branch_offset));
-                self.pc_src = PCSrc::BranchTarget;
-            }
-            PCSrc::JumpTarget => {
-                self.jump_target = Some(alu_result);
-                self.pc_src = PCSrc::JumpTarget;
-            }
-            PCSrc::Next => {
-                self.branch_target = None;
-                self.jump_target = None;
-                self.pc_src = PCSrc::Next;
-            }
-        }
-
-        Ok(EXMEM {
-            instruction: idex_reg.instruction,
             alu_result,
             alu_zero,
-            read_data_2: idex_reg.read_data_2,
-        })
+            operands_equal,
+            instruction.funct3(),
+            immediate,
+        )?;
+
+        self.stage_registers.exmem = EXMEM::Ex {
+            instruction,
+            alu_result,
+            alu_zero,
+            read_data_2,
+            pc_src,
+            pc,
+            control_signals,
+        };
+        Ok(())
     }
 
     /// the Memory stage of the CPU.
-    fn mem(&mut self, exmem_reg: EXMEM) -> (MEMWB, String) {
+    fn mem(&mut self) -> String {
         // if the execute stage failed, flush
-        if exmem_reg.instruction == Instruction::Flush {
-            return (MEMWB {
-                instruction: Instruction::Flush,
-                alu_result: 0,
-                mem_read_data: None,
-            }, String::new());
-        }
+        let (instruction, alu_result, read_data_2, pc, pc_src, control_signals) =
+            match self.stage_registers.exmem {
+                EXMEM::Flush => {
+                    self.stage_registers.memwb = MEMWB::Flush;
+                    return String::new();
+                }
+                EXMEM::Ex {
+                    instruction,
+                    alu_result,
+                    alu_zero: _,
+                    read_data_2,
+                    pc,
+                    pc_src,
+                    control_signals,
+                } => (
+                    instruction,
+                    alu_result,
+                    read_data_2,
+                    pc,
+                    pc_src,
+                    control_signals,
+                ),
+            };
 
-        match (self.control_signals.mem_read, self.control_signals.mem_write) {
+        let (memwb, report) = match (control_signals.mem_read, control_signals.mem_write) {
             (true, false) => {
                 // load
-                let mem_read_data = self.d_mem.read(exmem_reg.alu_result);
-                (MEMWB {
-                    instruction: exmem_reg.instruction,
-                    alu_result: exmem_reg.alu_result,
-                    mem_read_data: Some(mem_read_data),
-                },
-                String::new()
+                let mem_read_data = self.d_mem.read(alu_result);
+                (
+                    MEMWB::Mem {
+                        instruction,
+                        alu_result,
+                        mem_read_data: Some(mem_read_data),
+                        pc,
+                        pc_src,
+                        control_signals,
+                    },
+                    String::new(),
                 )
             }
             (false, true) => {
                 // store
-                self.d_mem.write(exmem_reg.alu_result, exmem_reg.read_data_2.expect("no data to store"));
-                (MEMWB {
-                    instruction: exmem_reg.instruction,
-                    alu_result: exmem_reg.alu_result,
-                    mem_read_data: None,
-                },
-                format!("memory 0x{:x} is modified to 0x{:x}\n",exmem_reg.alu_result,exmem_reg.read_data_2.expect("no data to store"))
+                self.d_mem
+                    .write(alu_result, read_data_2.expect("no data to store"));
+                (
+                    MEMWB::Mem {
+                        instruction,
+                        alu_result,
+                        mem_read_data: None,
+                        pc,
+                        pc_src,
+                        control_signals,
+                    },
+                    format!(
+                        "memory 0x{:x} is modified to 0x{:x}\n",
+                        alu_result,
+                        read_data_2.expect("no data to store")
+                    ),
                 )
             }
             (false, false) => {
                 // no memory operation
-                (MEMWB {
-                    instruction: exmem_reg.instruction,
-                    alu_result: exmem_reg.alu_result,
-                    mem_read_data: None,
-                },String::new())
+                (
+                    MEMWB::Mem {
+                        instruction,
+                        alu_result,
+                        mem_read_data: None,
+                        pc,
+                        pc_src,
+                        control_signals,
+                    },
+                    String::new(),
+                )
             }
-            (true,true) => panic!("invalid control signals for memory stage"),
-        }
+            (true, true) => panic!("invalid control signals for memory stage"),
+        };
+
+        self.stage_registers.memwb = memwb;
+
+        report
     }
 
     /// the Write Back stage of the CPU.
-    fn write_back(&mut self, memwb_reg: MEMWB) -> String {
+    fn write_back(&mut self) -> String {
         // if the memory stage failed, flush
-        if memwb_reg.instruction == Instruction::Flush {
-            return String::new();
-        }
+        let (instruction, alu_result, mem_read_data, pc, control_signals) =
+            match self.stage_registers.memwb {
+                MEMWB::Flush => {
+                    if let IF::Wb { .. } = self.stage_registers.if_stage {
+                        self.stage_registers.if_stage = IF::Wb {
+                            pc_src: PCSrc::Next,
+                        };
+                        self.stage_registers.wb_stage = WB::Flush;
+                    }
+                    return String::new();
+                }
+                MEMWB::Mem {
+                    instruction,
+                    alu_result,
+                    mem_read_data,
+                    pc,
+                    pc_src,
+                    control_signals,
+                } => {
+                    self.stage_registers.if_stage = IF::Wb { pc_src };
+                    (instruction, alu_result, mem_read_data, pc, control_signals)
+                }
+            };
 
-        match (self.control_signals.reg_write, memwb_reg.instruction.rd()) {
+        let report = match (control_signals.reg_write, instruction.rd()) {
             (true, Some(rd)) => {
                 // write to register file
-                match self.control_signals.wb_src {
-                    crate::signals::WriteBackSrc::NA => String::new(),
+                match control_signals.wb_src {
+                    crate::signals::WriteBackSrc::NA => {
+                        self.stage_registers.wb_stage = WB::Mem {
+                            instruction,
+                            wb_data: None,
+                            control_signals,
+                        };
+                        String::new()
+                    }
                     crate::signals::WriteBackSrc::ALU => {
+                        self.stage_registers.wb_stage = WB::Mem {
+                            instruction,
+                            wb_data: Some(alu_result),
+                            control_signals,
+                        };
                         // write the ALU result to the register file
-                        self.rf.write(rd, memwb_reg.alu_result);
-                        format!("{} is modified to 0x{:x}\n", rd,memwb_reg.alu_result)
-                    },
+                        self.rf.write(rd, alu_result);
+                        format!("{} is modified to 0x{:x}\n", rd, alu_result)
+                    }
                     crate::signals::WriteBackSrc::Mem => {
+                        self.stage_registers.wb_stage = WB::Mem {
+                            instruction,
+                            wb_data: mem_read_data,
+                            control_signals,
+                        };
                         // write the memory read data to the register file
-                        self.rf.write(rd, memwb_reg.mem_read_data.expect("no data to write"));
-                        format!("{} is modified to 0x{:x}\n", rd,memwb_reg.mem_read_data.expect("no data to write"))
-                    },
+                        self.rf.write(rd, mem_read_data.expect("no data to write"));
+                        format!(
+                            "{} is modified to 0x{:x}\n",
+                            rd,
+                            mem_read_data.expect("no data to write")
+                        )
+                    }
                     crate::signals::WriteBackSrc::PC => {
-                        self.rf.write(rd, self.next_pc);
-                        format!("{} is modified to 0x{:x}\n", rd,self.next_pc)
-                    },
+                        self.rf.write(rd, pc + 4);
+                        format!("{} is modified to 0x{:x}\n", rd, pc + 4)
+                    }
                 }
             }
             (true, None) => {
@@ -441,7 +590,9 @@ impl CPU {
                 // no write to register file
                 String::new()
             }
-        }
+        };
+
+        report
     }
 }
 
@@ -462,10 +613,12 @@ impl CPU {
 /// * `Err(anyhow::Error)` - if the arguments are invalid or the operation is not supported
 fn branching_jump_unit(
     branch_jump: BranchJump,
-    alu_zero: bool,
     alu_control: ALUControl,
+    alu_result: u32,
+    alu_zero: bool,
     operands_equal: bool,
     funct3: Option<u3>,
+    immediate: Immediate,
 ) -> Result<PCSrc> {
     match branch_jump {
         BranchJump::No => Ok(PCSrc::Next),
@@ -520,7 +673,15 @@ fn branching_jump_unit(
                     0b111,
                     false,
                     _,
-                ) => Ok(PCSrc::BranchTarget),
+                ) => Ok(
+                    match immediate {
+                        Immediate::BranchOffset(offset) => PCSrc::BranchTarget{offset},
+                        _ => return Err(anyhow::anyhow!("invalid immediate value\n")),
+                    }
+
+
+
+                ),
 
                 // don't take branch
                 (
@@ -531,7 +692,7 @@ fn branching_jump_unit(
                     false,
                 )
                 | // bne
-                (  
+                (
                     ALUControl::SUB,
                     0b001,
                     true,
@@ -569,7 +730,7 @@ fn branching_jump_unit(
                 _ => bail!("invalid branch instruction"),
             }
         }
-        BranchJump::Jal => Ok(PCSrc::JumpTarget),
+        BranchJump::Jal => Ok(PCSrc::JumpTarget { target: alu_result }),
     }
 }
 
@@ -586,12 +747,9 @@ mod tests {
         let rom = vec![0; 32];
         let cpu = CPU::new(rom);
 
-        assert_eq!(cpu.pc, 0);
-        assert_eq!(cpu.next_pc, 0);
-        assert_eq!(cpu.branch_target, None);
-        assert_eq!(cpu.jump_target, None);
+        assert_eq!(cpu.stage_registers, StageRegisters::default());
+        assert_eq!(cpu.stage_registers.if_stage, IF::Init);
         assert_eq!(cpu.total_clock_cycles, 0);
-        assert_eq!(cpu.control_signals, ControlSignals::default());
         assert_eq!(cpu.rf, RegisterFile::new());
         assert_eq!(cpu.d_mem, DataMemory::new());
         assert_eq!(cpu.i_mem.rom, vec![0; 32]);
@@ -648,29 +806,61 @@ mod tests {
         let rom = vec![0x00000013, 0x00000093, 0x00000073, 0x00000033];
         let mut cpu = CPU::new(rom);
 
-        let ifid = cpu.fetch(IF {});
+        let _ = cpu.fetch();
 
-        assert_eq!(ifid.instruction_code.unwrap(), 0x00000013);
-        assert_eq!(cpu.pc, 0);
-        assert_eq!(cpu.next_pc, 4);
+        match cpu.stage_registers.ifid {
+            IFID::If {
+                instruction_code,
+                pc,
+            } => {
+                assert_eq!(pc, 0);
+                assert_eq!(instruction_code, 0x00000013);
+            }
+            _ => panic!("expected IFID::If"),
+        }
 
-        let ifid = cpu.fetch(IF {});
+        cpu.stage_registers.if_stage = IF::Wb {
+            pc_src: PCSrc::Next,
+        };
 
-        assert_eq!(ifid.instruction_code.unwrap(), 0x00000093);
-        assert_eq!(cpu.pc, 4);
-        assert_eq!(cpu.next_pc, 8);
+        let _ = cpu.fetch();
 
-        let ifid = cpu.fetch(IF {});
+        match cpu.stage_registers.ifid {
+            IFID::If {
+                instruction_code,
+                pc,
+            } => {
+                assert_eq!(instruction_code, 0x00000093);
+                assert_eq!(pc, 4);
+            }
+            _ => panic!("expected IFID::If"),
+        }
 
-        assert_eq!(ifid.instruction_code.unwrap(), 0x00000073);
-        assert_eq!(cpu.pc, 8);
-        assert_eq!(cpu.next_pc, 12);
+        let _ = cpu.fetch();
 
-        let ifid = cpu.fetch(IF {});
+        match cpu.stage_registers.ifid {
+            IFID::If {
+                instruction_code,
+                pc,
+            } => {
+                assert_eq!(instruction_code, 0x00000073);
+                assert_eq!(pc, 8);
+            }
+            _ => panic!("expected IFID::If"),
+        }
 
-        assert_eq!(ifid.instruction_code.unwrap(), 0x00000033);
-        assert_eq!(cpu.pc, 12);
-        assert_eq!(cpu.next_pc, 16);
+        let _ = cpu.fetch();
+
+        match cpu.stage_registers.ifid {
+            IFID::If {
+                instruction_code,
+                pc,
+            } => {
+                assert_eq!(instruction_code, 0x00000033);
+                assert_eq!(pc, 12);
+            }
+            _ => panic!("expected IFID::If"),
+        }
     }
 
     #[test]
@@ -678,24 +868,35 @@ mod tests {
         let rom = vec![0x00000013];
         let mut cpu = CPU::new(rom);
 
-        let ifid = cpu.fetch(IF {});
-        let idex = cpu.decode(ifid).unwrap();
+        let _ = cpu.fetch();
+        cpu.decode().unwrap();
 
-        assert_eq!(
-            idex.instruction,
-            Instruction::IType {
-                funct7: None,
-                shamt: None,
-                opcode: u7::new(0b0010011),
-                rd: RegisterMapping::Zero,
-                funct3: u3::new(0),
-                rs1: RegisterMapping::Zero,
-                imm: i12::new(0),
+        match cpu.stage_registers.idex {
+            IDEX::Id {
+                instruction,
+                read_data_1,
+                read_data_2,
+                immediate,
+                ..
+            } => {
+                assert_eq!(
+                    instruction,
+                    Instruction::IType {
+                        funct7: None,
+                        shamt: None,
+                        opcode: u7::new(0b0010011),
+                        rd: RegisterMapping::Zero,
+                        funct3: u3::new(0),
+                        rs1: RegisterMapping::Zero,
+                        imm: i12::new(0),
+                    }
+                );
+                assert_eq!(read_data_1, Some(0));
+                assert_eq!(read_data_2, None);
+                assert_eq!(immediate, Immediate::SignedImmediate(0));
             }
-        );
-        assert_eq!(idex.read_data_1, Some(0));
-        assert_eq!(idex.read_data_2, None);
-        assert_eq!(idex.immediate, Immediate::SignedImmediate(0));
+            _ => panic!("expected IDEX::Id"),
+        }
     }
 
     #[test]
@@ -703,30 +904,44 @@ mod tests {
         let rom = vec![0x00000013];
         let mut cpu = CPU::new(rom);
 
-        let ifid = cpu.fetch(IF {});
-        let idex = cpu.decode(ifid).unwrap();
-        let exmem = cpu.execute(idex).unwrap();
+        let _ = cpu.fetch();
+        cpu.decode().unwrap();
+        cpu.execute().unwrap();
 
-        assert_eq!(
-            exmem.instruction,
-            Instruction::IType {
-                funct7: None,
-                shamt: None,
-                opcode: u7::new(0b0010011),
-                rd: RegisterMapping::Zero,
-                funct3: u3::new(0),
-                rs1: RegisterMapping::Zero,
-                imm: i12::new(0),
+        match cpu.stage_registers.exmem {
+            EXMEM::Ex {
+                instruction,
+                alu_result,
+                alu_zero,
+                read_data_2,
+                pc_src,
+                pc: _,
+                control_signals: _,
+            } => {
+                assert_eq!(
+                    instruction,
+                    Instruction::IType {
+                        funct7: None,
+                        shamt: None,
+                        opcode: u7::new(0b0010011),
+                        rd: RegisterMapping::Zero,
+                        funct3: u3::new(0),
+                        rs1: RegisterMapping::Zero,
+                        imm: i12::new(0),
+                    }
+                );
+                assert_eq!(alu_result, 0);
+                assert_eq!(alu_zero, true);
+                assert_eq!(read_data_2, None);
+                assert_eq!(pc_src, PCSrc::Next);
             }
-        );
-        assert_eq!(exmem.alu_result, 0);
-        assert_eq!(exmem.alu_zero, true);
-        assert_eq!(exmem.read_data_2, None);
+            _ => panic!("expected EXMEM::Ex"),
+        }
     }
 
     #[test]
     fn test_cpu_mem() {
-        // this instruction will load the value at offset 4 from the address in register T2 into register T0
+        // this instruction will load the value at offset 4 from the address in register T2 (0) into register T0
         let rom = vec![0x0043_A283];
         let mut cpu = CPU::new(rom);
 
@@ -735,12 +950,38 @@ mod tests {
         cpu.d_mem.write(4, 10);
         cpu.d_mem.write(8, 15);
 
-        let ifid = cpu.fetch(IF {});
-        let idex = cpu.decode(ifid).unwrap();
-        let exmem = cpu.execute(idex).unwrap();
-        let (memwb, _) = cpu.mem(exmem);
+        let _ = cpu.fetch();
+        cpu.decode().unwrap();
+        cpu.execute().unwrap();
+        let _ = cpu.mem();
 
-        assert_eq!(memwb.mem_read_data, Some(10));
+        match cpu.stage_registers.memwb {
+            MEMWB::Mem {
+                instruction,
+                alu_result,
+                mem_read_data,
+                pc_src,
+                pc: _,
+                control_signals: _,
+            } => {
+                assert_eq!(
+                    instruction,
+                    Instruction::IType {
+                        funct7: None,
+                        shamt: None,
+                        opcode: u7::new(0b0000011),
+                        rd: RegisterMapping::T0,
+                        funct3: u3::new(2),
+                        rs1: RegisterMapping::T2,
+                        imm: i12::new(4),
+                    }
+                );
+                assert_eq!(alu_result, 4);
+                assert_eq!(mem_read_data, Some(10));
+                assert_eq!(pc_src, PCSrc::Next);
+            }
+            _ => panic!("expected MEMWB::Mem"),
+        }
     }
 
     #[test]
@@ -752,12 +993,127 @@ mod tests {
         // put some data in the data memory
         cpu.d_mem.write(4, 10);
 
-        let ifid = cpu.fetch(IF {});
-        let idex = cpu.decode(ifid).unwrap();
-        let exmem = cpu.execute(idex).unwrap();
-        let (memwb, _) = cpu.mem(exmem);
-        cpu.write_back(memwb);
+        let _ = cpu.fetch();
+        cpu.decode().unwrap();
+        cpu.execute().unwrap();
+        let _ = cpu.mem();
+        cpu.write_back();
+
+        match cpu.stage_registers.if_stage {
+            IF::Wb { pc_src } => {
+                assert_eq!(pc_src, PCSrc::Next);
+            }
+            _ => panic!("expected IF::Wb"),
+        }
 
         assert_eq!(cpu.rf.read(RegisterMapping::T0), 10);
+    }
+
+    #[test]
+    fn test_data_load_hazard() {
+        let rom = vec![
+            0x007302b3, // add t0, t1, t2 // t0 = 3 + 7 = 10
+            0x41c28e33, // sub t3, t0, t3 // t3 = 10 - 11 = -1
+            0x01f2feb3, // and t4, t0, t6 // t4 = 10 & 19 = 2
+            0x01d2ef33, // or t5, t0, t4  // t5 = 10 | 2 = 10
+            0x01eecfb3, // xor t6, t4, t5 // t6 = 10 ^ 2 = 8
+        ];
+        // (expected) pipeline table
+        // | cycle | IF | ID | EX | MEM | WB |
+        // |-------|----|----|----|-----|----|
+        // | 1     | I1 |    |    |     |    |
+        // | 2     | I2 | I1 |    |     |    |
+        // | 3     | I3 | I2 | I1 |     |    |
+        // | 4     | I4 | I3 | I2 | I1  |    |
+        // | 5     | I5 | I4 | I3 | I2  | I1 |
+        // | 6     |    | I5 | I4 | I3  | I2 |
+        // | 7     |    |    | I5 | I4  | I3 |
+        // | 8     |    |    |    | I5  | I4 |
+        // | 9     |    |    |    |     | I5 |
+
+        let mut cpu = CPU::new(rom);
+        // set up initial register values
+        cpu.initialize_rf(&[
+            (RegisterMapping::T0, 1),
+            (RegisterMapping::T1, 3),
+            (RegisterMapping::T2, 7),
+            (RegisterMapping::T3, 11),
+            (RegisterMapping::T4, 13),
+            (RegisterMapping::T5, 17),
+            (RegisterMapping::T6, 19),
+        ]);
+
+        let _ = cpu.run_step().expect("error in first cycle");
+        let _ = cpu.run_step().expect("error in second cycle");
+        let _ = cpu.run_step().expect("error in third cycle");
+        let _ = cpu.run_step().expect("error in fourth cycle");
+        let _ = cpu.run_step().expect("error in fifth cycle");
+        assert_eq!(cpu.rf.read(RegisterMapping::T0), 10);
+        let _ = cpu.run_step().expect("error in sixth cycle");
+        assert_eq!(cpu.rf.read(RegisterMapping::T3), -1i32 as u32);
+        let _ = cpu.run_step().expect("error in seventh cycle");
+        assert_eq!(cpu.rf.read(RegisterMapping::T4), 2);
+        let _ = cpu.run_step().expect("error in eighth cycle");
+        assert_eq!(cpu.rf.read(RegisterMapping::T5), 10);
+        let _ = cpu.run_step().expect("error in ninth cycle");
+        assert_eq!(cpu.rf.read(RegisterMapping::T6), 8);
+    }
+
+    #[test]
+    fn test_data_rtype_hazard() {
+        let rom = vec![
+            0x0002a303, // lw t1, 0(t0)   // t1 = 3
+            0x007302b3, // add t0, t1, t2 // t0 = 3 + 7 = 10
+            0x41c28e33, // sub t3, t0, t2 // t3 = 10 - 11 = -1
+            0x01f2feb3, // and t4, t0, t6 // t4 = 10 & 19 = 2
+            0x01d2ef33, // or t5, t0, t4  // t5 = 10 | 2 = 10
+            0x01eecfb3, // xor t6, t4, t5 // t6 = 10 ^ 2 = 8
+        ];
+        // (expected) pipeline table
+        // | cycle | IF | ID | EX | MEM | WB |
+        // |-------|----|----|----|-----|----|
+        // | 1     | I1 |    |    |     |    |
+        // | 2     | I2 | I1 |    |     |    |
+        // | 3     | I3 | I2 | I1 |     |    |
+        // | 4     | I4 | I3 | I2 | I1  |    |
+        // | 5     | I5 | I4 | I3 | I2  | I1 |
+        // | 6     | I6 | I5 | I4 | I3  | I2 |
+        // | 7     |    | I6 | I5 | I4  | I3 |
+        // | 8     |    |    | I6 | I5  | I4 |
+        // | 9     |    |    |    | I6  | I5 |
+        // | 10    |    |    |    |     | I6 |
+
+        let mut cpu = CPU::new(rom);
+        // set up initial register values
+        cpu.initialize_rf(&[
+            (RegisterMapping::T0, 0),
+            (RegisterMapping::T1, 0),
+            (RegisterMapping::T2, 7),
+            (RegisterMapping::T3, 11),
+            (RegisterMapping::T4, 13),
+            (RegisterMapping::T5, 17),
+            (RegisterMapping::T6, 19),
+        ]);
+        // put some data in the data memory
+        cpu.d_mem.write(0, 3);
+
+        let _ = cpu.run_step().expect("error in first cycle");
+        let _ = cpu.run_step().expect("error in second cycle");
+        let stall_cycle = cpu.run_step().expect("error in third cycle");
+        assert!(stall_cycle.contains("pipeline stalled in the decode stage"));
+        let _ = cpu.run_step().expect("error in fourth cycle"); // stall
+        let _ = cpu.run_step().expect("error in fifth cycle");
+        let _ = cpu.run_step().expect("error in sixth cycle");
+        assert_eq!(cpu.rf.read(RegisterMapping::T1), 3);
+        let _ = cpu.run_step().expect("error in seventh cycle");
+        assert_eq!(cpu.rf.read(RegisterMapping::T0), 10);
+        let _ = cpu.run_step().expect("error in eighth cycle");
+        assert_eq!(cpu.rf.read(RegisterMapping::T3), -1i32 as u32);
+        let _ = cpu.run_step().expect("error in ninth cycle");
+        assert_eq!(cpu.rf.read(RegisterMapping::T4), 2);
+        let _ = cpu.run_step().expect("error in tenth cycle");
+        assert_eq!(cpu.rf.read(RegisterMapping::T5), 10);
+        let _ = cpu.run_step().expect("error in eleventh cycle");
+        assert_eq!(cpu.rf.read(RegisterMapping::T6), 8);
     }
 }
