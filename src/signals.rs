@@ -77,16 +77,26 @@ pub enum ALUControl {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
-#[repr(u8)]
-/// a 2 bit signal that specifies where the next PC should come from.
+/// a signal that specifies where the next PC should come from.
 pub enum PCSrc {
     #[default]
     /// The next PC value comes from PC + 4
-    Next = 0b00,
+    Next,
     /// The next PC value comes from the branch target address,
-    BranchTarget = 0b01,
+    BranchTarget { offset: i32 },
     /// The next PC value comes from the jump target address
-    JumpTarget = 0b10,
+    JumpTarget { target: u32 },
+}
+
+impl PCSrc {
+    /// returns the next PC value.
+    pub fn next(&self, pc: u32) -> u32 {
+        match self {
+            PCSrc::Next => pc + 4,
+            PCSrc::BranchTarget { offset } => pc.wrapping_add_signed(*offset),
+            PCSrc::JumpTarget { target } => *target,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]

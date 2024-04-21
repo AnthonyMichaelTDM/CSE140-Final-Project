@@ -3,7 +3,7 @@ use ux::{i12, i13, u20, u21, u3, u5, u7};
 
 use crate::registers::RegisterMapping;
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone, Default)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum Instruction {
     RType {
         funct7: u7,
@@ -48,9 +48,6 @@ pub enum Instruction {
         rd: RegisterMapping,
         opcode: u7,
     },
-    #[default]
-    /// used to flush the pipeline
-    Flush,
 }
 
 impl Instruction {
@@ -208,7 +205,6 @@ impl Instruction {
             | Self::SBType { opcode, .. }
             | Self::UType { opcode, .. }
             | Self::UJType { opcode, .. } => Some(*opcode),
-            Self::Flush => None,
         }
     }
 
@@ -218,7 +214,7 @@ impl Instruction {
             | Self::IType { funct3, .. }
             | Self::SType { funct3, .. }
             | Self::SBType { funct3, .. } => Some(*funct3),
-            Self::UType { .. } | Self::UJType { .. } | Self::Flush => None,
+            Self::UType { .. } | Self::UJType { .. } => None,
         }
     }
 
@@ -248,7 +244,7 @@ impl Instruction {
             | Self::IType { rd, .. }
             | Self::UType { rd, .. }
             | Self::UJType { rd, .. } => Some(*rd),
-            Self::SType { .. } | Self::SBType { .. } | Self::Flush => None,
+            Self::SType { .. } | Self::SBType { .. } => None,
         }
     }
 }

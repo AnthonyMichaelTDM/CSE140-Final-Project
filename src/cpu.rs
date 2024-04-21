@@ -77,23 +77,22 @@ impl DataMemory {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct CPU {
     pc: u32,
-    /// This variable will be updated by Fetch() function and used as the PC value in the next cycle if no branch or jump was taken.
-    next_pc: u32,
-    /// This variable will be updated by Execute() function and used by Fetch() function to decide the PC value of the next cycle.
-    /// The branch_target variable will be set to the target address of the branch instruction.
-    /// This will be used as the PC value in the next cycle if a branch was taken.
-    branch_target: Option<u32>,
-    /// This variable will be updated by Execute() function and used by Fetch() function to decide the PC value of the next cycle.
-    /// The jump_target variable will be set to the target address of the jump instruction.
-    /// This will be used as the PC value in the next cycle if a jump was taken.
-    jump_target: Option<u32>,
-    /// The PCSrc signal is a 2 bit signal that tells the cpu where to get the next PC value from.
-    /// 00: PC + 4
-    /// 01: branch_target
-    /// 10: jump_target
-    pc_src: PCSrc,
+
+    // /// This variable will be updated by Fetch() function and used as the PC value in the next cycle if no branch or jump was taken.
+    // next_pc: u32,
+    // /// This variable will be updated by Execute() function and used by Fetch() function to decide the PC value of the next cycle.
+    // /// The branch_target variable will be set to the target address of the branch instruction.
+    // /// This will be used as the PC value in the next cycle if a branch was taken.
+    // branch_target: Option<u32>,
+    // /// This variable will be updated by Execute() function and used by Fetch() function to decide the PC value of the next cycle.
+    // /// The jump_target variable will be set to the target address of the jump instruction.
+    // /// This will be used as the PC value in the next cycle if a jump was taken.
+    // jump_target: Option<u32>,
     total_clock_cycles: u64,
-    control_signals: ControlSignals,
+    /// the stage registers of the CPU.
+    /// These registers will be updated by the corresponding stage functions.
+    stage_registers: StageRegisters,
+
     /// an integer array that has 32 entries.
     /// This register file array will be initialized to have all zeros unless otherwise specified.
     /// This register file will be updated by WriteBack() function.
@@ -124,15 +123,11 @@ impl CPU {
     pub fn new(rom: Vec<u32>) -> Self {
         Self {
             pc: 0,
-            next_pc: 0,
-            branch_target: None,
-            jump_target: None,
             total_clock_cycles: 0,
-            control_signals: ControlSignals::default(),
+            stage_registers: StageRegisters::default(),
             rf: RegisterFile::new(),
             d_mem: DataMemory::new(),
             i_mem: InstructionMemory::new(rom),
-            pc_src: PCSrc::Next,
         }
     }
 
