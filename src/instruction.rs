@@ -247,6 +247,25 @@ impl Instruction {
             Self::SType { .. } | Self::SBType { .. } => None,
         }
     }
+
+    pub fn rs1(&self) -> Option<RegisterMapping> {
+        match self {
+            Self::RType { rs1, .. }
+            | Self::IType { rs1, .. }
+            | Self::SType { rs1, .. }
+            | Self::SBType { rs1, .. } => Some(*rs1),
+            Self::UType { .. } | Self::UJType { .. } => None,
+        }
+    }
+
+    pub fn rs2(&self) -> Option<RegisterMapping> {
+        match self {
+            Self::RType { rs2, .. } | Self::SType { rs2, .. } | Self::SBType { rs2, .. } => {
+                Some(*rs2)
+            }
+            Self::IType { .. } | Self::UType { .. } | Self::UJType { .. } => None,
+        }
+    }
 }
 
 #[cfg(test)]
