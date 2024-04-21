@@ -14,19 +14,68 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     fn sample1_rom() -> Vec<u32> {
-        include_str!("../sample_part1.txt")
+        let mut rom = include_str!("../sample_part1.txt")
             .split("\n")
             .map(|line| utils::bit_vec_from_string(line).map(|bits| utils::bit_vec_to_int(&bits)))
             .collect::<Result<Vec<u32>>>()
-            .unwrap()
+            .unwrap();
+        // just in case the last line is empty
+        if rom.last() == Some(&0) {
+            rom.pop();
+        }
+
+        rom
+
+        // sample 1 is the following:
+        // 00000000010001010010000110000011 // lw x3, 4(x10) // x3 = 0x10
+        // 01000000001000001000001010110011 // sub x5, x1, x2 // x5 = x1 - x2 = 0x20 - 0x5 = 0x1b
+        // 00000000001100101000011001100011 // beq x5, x3, 12 // not taken
+        // 00000000001100101000001010110011 // add x5, x5, x3 // x5 = 0x1b + 0x10 = 0x2b
+        // 00000000010101011110001010110011 // or x5, x5, x11 // x5 = 0x2b | 0x4 = 0x2f
+        // 00000000010101010010000000100011 // sw x5, 0(x10) // memory[0x70] = 0x2f
+
+        // pipeline table (expected):
+        // | cycle | IF | ID | EX | MEM | WB |   | PC |
+        // |-------|----|----|----|-----|----|--|----|
+        // | 1     | I1 |    |    |     |    |  | 0  |
+        // | 2     | I2 | I1 |    |     |    |  | 4  |
+        // | 3     | I3 | I2 | I1 |     |    |  | 8  |
+        // | 4     | I4 | I3 | I2 | I1  |    |  | 12 |
+        // | 5     | I5 | I4 | I3 | I2  | I1 |  | 16 |
+        // | 6     | I6 | I5 | I4 | I3  | I2 |  | 20 |
+        // | 7     |    | I6 | I5 | I4  | I3 |
+        // | 8     |    |    | I6 | I5  | I4 |
+        // | 9     |    |    |    | I6  | I5 |
+        // | 10    |    |    |    |     | I6 |
+    }
+
+    #[test]
+    fn test_sample_1_rom() {
+        assert_eq!(
+            sample1_rom(),
+            vec![
+                0b00000000010001010010000110000011,
+                0b01000000001000001000001010110011,
+                0b00000000001100101000011001100011,
+                0b00000000001100101000001010110011,
+                0b00000000010101011110001010110011,
+                0b00000000010101010010000000100011,
+            ]
+        )
     }
 
     fn sample2_rom() -> Vec<u32> {
-        include_str!("../sample_part2.txt")
+        let mut rom = include_str!("../sample_part2.txt")
             .split("\n")
             .map(|line| utils::bit_vec_from_string(line).map(|bits| utils::bit_vec_to_int(&bits)))
             .collect::<Result<Vec<u32>>>()
-            .unwrap()
+            .unwrap();
+
+        // just in case the last line is empty
+        if rom.last() == Some(&0) {
+            rom.pop();
+        }
+        rom
     }
 
     fn sample1_rf() -> Vec<(registers::RegisterMapping, u32)> {

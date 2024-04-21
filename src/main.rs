@@ -40,10 +40,15 @@ fn main() -> Result<()> {
     let file = std::fs::read_to_string(file_name)?;
 
     // parse the file
-    let i_mem = file
+    let mut i_mem = file
         .split("\n")
         .map(|line| bit_vec_from_string(line).map(|bits| bit_vec_to_int(&bits)))
         .collect::<Result<Vec<u32>>>()?;
+
+    // just in case the last line is empty
+    if i_mem.last() == Some(&0) {
+        i_mem.pop();
+    }
 
     // Initialize the CPU state
     let mut cpu = CPU::new(i_mem);
