@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use ux::u3;
 
 use crate::{
@@ -7,7 +7,7 @@ use crate::{
     instruction::Instruction,
     registers::{RegisterFile, RegisterMapping},
     signals::{control_unit, ALUControl, ALUSrcA, ALUSrcB, BranchJump, PCSrc},
-    stages::{Immediate, StageRegisters, EXMEM, IDEX, IF, IFID, MEMWB, WB},
+    stages::{Immediate, StageRegisters, EXMEM, IDEX, IFID, MEMWB, WB},
 };
 
 /// a string that holds a report of what happened in the CPU during a clock cycle.
@@ -77,18 +77,15 @@ impl DataMemory {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct CPU {
+    /// the program counter value of the current instruction.
     pc: u32,
+    /// the next program counter value.
+    pc_src: PCSrc,
+    /// signal that, when flipped, flushes the IF stage (prevents it from running for a cycle)
+    /// this is used to handle stalls in the pipeline
+    if_flush: bool,
 
-    // /// This variable will be updated by Fetch() function and used as the PC value in the next cycle if no branch or jump was taken.
-    // next_pc: u32,
-    // /// This variable will be updated by Execute() function and used by Fetch() function to decide the PC value of the next cycle.
-    // /// The branch_target variable will be set to the target address of the branch instruction.
-    // /// This will be used as the PC value in the next cycle if a branch was taken.
-    // branch_target: Option<u32>,
-    // /// This variable will be updated by Execute() function and used by Fetch() function to decide the PC value of the next cycle.
-    // /// The jump_target variable will be set to the target address of the jump instruction.
-    // /// This will be used as the PC value in the next cycle if a jump was taken.
-    // jump_target: Option<u32>,
+    /// the total number of clock cycles that the CPU has executed.
     total_clock_cycles: u64,
     /// the stage registers of the CPU.
     /// These registers will be updated by the corresponding stage functions.
@@ -124,6 +121,8 @@ impl CPU {
     pub fn new(rom: Vec<u32>) -> Self {
         Self {
             pc: 0,
+            pc_src: PCSrc::Init,
+            if_flush: false,
             total_clock_cycles: 0,
             stage_registers: StageRegisters::default(),
             rf: RegisterFile::new(),
@@ -146,6 +145,15 @@ impl CPU {
         self.total_clock_cycles
     }
 
+    /// is the program over
+    pub fn is_done(&self) -> bool {
+        self.pc_src == PCSrc::End
+            && matches!(self.stage_registers.ifid, IFID::Flush)
+            && matches!(self.stage_registers.idex, IDEX::Flush)
+            && matches!(self.stage_registers.exmem, EXMEM::Flush)
+            && matches!(self.stage_registers.memwb, MEMWB::Flush)
+    }
+
     /// Main loop of the CPU simulator
     pub fn run(&mut self) {
         loop {
@@ -160,7 +168,7 @@ impl CPU {
                 }
             }
 
-            if let IF::Flush = self.stage_registers.if_stage {
+            if self.is_done() {
                 break;
             }
         }
@@ -201,36 +209,44 @@ impl CPU {
             return String::from("pipeline stalled in the decode stage\n");
         }
 
-        // increment the program counter
-        let report = match self.stage_registers.if_stage {
-            IF::Wb { pc_src } => {
-                self.pc = pc_src.next(self.pc);
-                format!("pc is modified to 0x{:x}\n", self.pc)
-            }
-            IF::Init => {
-                self.pc = 0;
-                self.stage_registers.if_stage = IF::Wb {
-                    pc_src: PCSrc::Next,
-                };
-                String::new()
-            }
-            IF::Flush => {
-                self.stage_registers.ifid = IFID::Flush;
-                return String::new();
-            }
-        };
+        // if the execute stage told us to flush the IF stage, we don't need to do anything
+        if self.if_flush {
+            self.if_flush = false;
+            return String::from("pipeline flushed\n");
+        }
 
+        // increment the program counter
+        self.pc = self.pc_src.next(self.pc);
         // get the current instruction from the ROM
         let Some(instruction_code) = self.i_mem.get_instruction(self.pc) else {
-            self.stage_registers.if_stage = IF::Flush;
+            self.pc_src = PCSrc::End;
             self.stage_registers.ifid = IFID::Flush;
-            return report;
+            return String::new();
         };
-
+        // set the IF/ID stage registers
         self.stage_registers.ifid = IFID::If {
             instruction_code,
             pc: self.pc,
         };
+
+        // report if the pc was modified
+        let report = match self.pc_src {
+            PCSrc::Init => String::new(),
+            PCSrc::End => {
+                return String::new();
+            }
+            _ => {
+                format!("pc is modified to 0x{:x}\n", self.pc)
+            }
+        };
+        // if the pc_src was init, branch, or jump, we need to reset it to next
+        if matches!(
+            self.pc_src,
+            PCSrc::Init | PCSrc::BranchTarget { .. } | PCSrc::JumpTarget { .. }
+        ) {
+            self.pc_src = PCSrc::Next;
+        }
+
         report
     }
 
@@ -431,7 +447,7 @@ impl CPU {
     /// the Memory stage of the CPU.
     fn mem(&mut self) -> String {
         // if the execute stage failed, flush
-        let (instruction, alu_result, read_data_2, pc, pc_src, control_signals) =
+        let (instruction, alu_result, read_data_2, pc, control_signals) =
             match self.stage_registers.exmem {
                 EXMEM::Flush => {
                     self.stage_registers.memwb = MEMWB::Flush;
@@ -442,17 +458,22 @@ impl CPU {
                     alu_result,
                     alu_zero: _,
                     read_data_2,
-                    pc,
                     pc_src,
-                    control_signals,
-                } => (
-                    instruction,
-                    alu_result,
-                    read_data_2,
                     pc,
-                    pc_src,
                     control_signals,
-                ),
+                } => {
+                    // if the branch and jump unit told us to take a branch or jump, we need to flush the pipeline
+                    match pc_src {
+                        PCSrc::BranchTarget { .. } | PCSrc::JumpTarget { .. } => {
+                            self.stage_registers.ifid = IFID::Flush;
+                            self.stage_registers.idex = IDEX::Flush;
+                            self.if_flush = true;
+                        }
+                        _ => (),
+                    }
+                    self.pc_src = pc_src;
+                    (instruction, alu_result, read_data_2, pc, control_signals)
+                }
             };
 
         let (memwb, report) = match (control_signals.mem_read, control_signals.mem_write) {
@@ -465,7 +486,6 @@ impl CPU {
                         alu_result,
                         mem_read_data: Some(mem_read_data),
                         pc,
-                        pc_src,
                         control_signals,
                     },
                     String::new(),
@@ -481,7 +501,6 @@ impl CPU {
                         alu_result,
                         mem_read_data: None,
                         pc,
-                        pc_src,
                         control_signals,
                     },
                     format!(
@@ -499,7 +518,6 @@ impl CPU {
                         alu_result,
                         mem_read_data: None,
                         pc,
-                        pc_src,
                         control_signals,
                     },
                     String::new(),
@@ -519,12 +537,7 @@ impl CPU {
         let (instruction, alu_result, mem_read_data, pc, control_signals) =
             match self.stage_registers.memwb {
                 MEMWB::Flush => {
-                    if let IF::Wb { .. } = self.stage_registers.if_stage {
-                        self.stage_registers.if_stage = IF::Wb {
-                            pc_src: PCSrc::Next,
-                        };
-                        self.stage_registers.wb_stage = WB::Flush;
-                    }
+                    self.stage_registers.wb_stage = WB::Flush;
                     return String::new();
                 }
                 MEMWB::Mem {
@@ -532,12 +545,8 @@ impl CPU {
                     alu_result,
                     mem_read_data,
                     pc,
-                    pc_src,
                     control_signals,
-                } => {
-                    self.stage_registers.if_stage = IF::Wb { pc_src };
-                    (instruction, alu_result, mem_read_data, pc, control_signals)
-                }
+                } => (instruction, alu_result, mem_read_data, pc, control_signals),
             };
 
         let report = match (control_signals.reg_write, instruction.rd()) {
@@ -577,6 +586,11 @@ impl CPU {
                         )
                     }
                     crate::signals::WriteBackSrc::PC => {
+                        self.stage_registers.wb_stage = WB::Mem {
+                            instruction,
+                            wb_data: Some(pc + 4),
+                            control_signals,
+                        };
                         self.rf.write(rd, pc + 4);
                         format!("{} is modified to 0x{:x}\n", rd, pc + 4)
                     }
@@ -748,7 +762,7 @@ mod tests {
         let cpu = CPU::new(rom);
 
         assert_eq!(cpu.stage_registers, StageRegisters::default());
-        assert_eq!(cpu.stage_registers.if_stage, IF::Init);
+        assert_eq!(cpu.pc_src, PCSrc::Init);
         assert_eq!(cpu.total_clock_cycles, 0);
         assert_eq!(cpu.rf, RegisterFile::new());
         assert_eq!(cpu.d_mem, DataMemory::new());
@@ -818,10 +832,6 @@ mod tests {
             }
             _ => panic!("expected IFID::If"),
         }
-
-        cpu.stage_registers.if_stage = IF::Wb {
-            pc_src: PCSrc::Next,
-        };
 
         let _ = cpu.fetch();
 
@@ -914,9 +924,7 @@ mod tests {
                 alu_result,
                 alu_zero,
                 read_data_2,
-                pc_src,
-                pc: _,
-                control_signals: _,
+                ..
             } => {
                 assert_eq!(
                     instruction,
@@ -933,7 +941,7 @@ mod tests {
                 assert_eq!(alu_result, 0);
                 assert_eq!(alu_zero, true);
                 assert_eq!(read_data_2, None);
-                assert_eq!(pc_src, PCSrc::Next);
+                assert_eq!(cpu.pc_src, PCSrc::Next);
             }
             _ => panic!("expected EXMEM::Ex"),
         }
@@ -960,7 +968,6 @@ mod tests {
                 instruction,
                 alu_result,
                 mem_read_data,
-                pc_src,
                 pc: _,
                 control_signals: _,
             } => {
@@ -978,7 +985,7 @@ mod tests {
                 );
                 assert_eq!(alu_result, 4);
                 assert_eq!(mem_read_data, Some(10));
-                assert_eq!(pc_src, PCSrc::Next);
+                assert_eq!(cpu.pc_src, PCSrc::Next);
             }
             _ => panic!("expected MEMWB::Mem"),
         }
@@ -999,12 +1006,7 @@ mod tests {
         let _ = cpu.mem();
         cpu.write_back();
 
-        match cpu.stage_registers.if_stage {
-            IF::Wb { pc_src } => {
-                assert_eq!(pc_src, PCSrc::Next);
-            }
-            _ => panic!("expected IF::Wb"),
-        }
+        assert_eq!(cpu.pc_src, PCSrc::Next);
 
         assert_eq!(cpu.rf.read(RegisterMapping::T0), 10);
     }

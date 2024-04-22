@@ -13,26 +13,11 @@ pub type Report = String;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 pub struct StageRegisters {
-    pub if_stage: IF,
     pub ifid: IFID,
     pub idex: IDEX,
     pub exmem: EXMEM,
     pub memwb: MEMWB,
     pub wb_stage: WB,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
-pub enum IF {
-    Wb {
-        /// The PCSrc signal tells the cpu where to get the next PC value from.
-        /// in the implementation, it also holds the next PC value.
-        pc_src: PCSrc,
-    },
-    #[default]
-    /// used for the first cycle.
-    Init,
-    /// used to flush the pipeline (e.g. when the program ends).
-    Flush,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
@@ -112,8 +97,6 @@ pub enum MEMWB {
         // reg_write: bool,
         /// the program counter value of the instruction.
         pc: u32,
-        /// the next program counter value.
-        pc_src: PCSrc,
         control_signals: ControlSignals,
     },
     #[default]
