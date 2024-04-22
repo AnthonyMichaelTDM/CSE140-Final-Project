@@ -374,36 +374,34 @@ impl CPU {
             self.stage_registers.idex,
         );
 
+        // data forwarding
+        let read_data_1 = match (
+            forward_a,
+            self.stage_registers.exmem,
+            self.stage_registers.wb_stage,
+        ) {
+            (ForwardA::EXMEM, EXMEM::Ex { alu_result, .. }, _) => Some(alu_result),
+            (ForwardA::MEMWB, _, WB::Mem { wb_data, .. }) => wb_data,
+            _ => read_data_1,
+        };
+        let read_data_2 = match (
+            forward_b,
+            self.stage_registers.exmem,
+            self.stage_registers.wb_stage,
+        ) {
+            (ForwardB::EXMEM, EXMEM::Ex { alu_result, .. }, _) => Some(alu_result),
+            (ForwardB::MEMWB, _, WB::Mem { wb_data, .. }) => wb_data,
+            _ => read_data_2,
+        };
+
         // ALU operation
         let alu_operand_a: u32 = match control_signals.alu_src_a {
-            ALUSrcA::Register => match (
-                forward_a,
-                self.stage_registers.exmem,
-                self.stage_registers.wb_stage,
-            ) {
-                (ForwardA::None, _, _) => read_data_1.unwrap(),
-                (ForwardA::EXMEM, EXMEM::Ex { alu_result, .. }, _) => alu_result,
-                (ForwardA::MEMWB, _, WB::Mem { wb_data, .. }) => {
-                    wb_data.ok_or(anyhow!("no data to forward"))?
-                }
-                _ => read_data_1.unwrap(),
-            },
+            ALUSrcA::Register => read_data_1.unwrap(),
             ALUSrcA::PC => pc,
             ALUSrcA::Constant0 => 0,
         };
         let alu_operand_b: u32 = match control_signals.alu_src_b {
-            ALUSrcB::Register => match (
-                forward_b,
-                self.stage_registers.exmem,
-                self.stage_registers.wb_stage,
-            ) {
-                (ForwardB::None, _, _) => read_data_2.unwrap(),
-                (ForwardB::EXMEM, EXMEM::Ex { alu_result, .. }, _) => alu_result,
-                (ForwardB::MEMWB, _, WB::Mem { wb_data, .. }) => {
-                    wb_data.ok_or(anyhow!("no data to forward"))?
-                }
-                _ => read_data_2.unwrap(),
-            },
+            ALUSrcB::Register => read_data_2.unwrap(),
             ALUSrcB::Immediate => match immediate {
                 Immediate::SignedImmediate(imm) => imm as u32,
                 Immediate::BranchOffset(_) => {
