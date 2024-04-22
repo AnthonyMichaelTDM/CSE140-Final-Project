@@ -36,7 +36,7 @@ mod tests {
         // 00000000010101010010000000100011 // sw x5, 0(x10) // memory[0x70] = 0x2f
 
         // pipeline table (expected):
-        // | cycle | IF | ID | EX | MEM | WB |   | PC |
+        // | cycle | IF | ID | EX | MEM | WB |  | PC |
         // |-------|----|----|----|-----|----|--|----|
         // | 1     | I1 |    |    |     |    |  | 0  |
         // | 2     | I2 | I1 |    |     |    |  | 4  |
@@ -77,6 +77,37 @@ mod tests {
             rom.pop();
         }
         rom
+
+        // sample 2 is the following:
+        // 00000000100000000000000011101111 // jal x1, 8
+        // 00000001000000000000000011101111 // jal x1, 16
+        // 00000000110001011000010100110011 // add x10, x12, x11
+        // 01000000101001101000111100110011 // sub x30, x10, x13
+        // 00000000000000001000000011100111 // jalr x1, x1, 0
+        // 00000001111001000010000000100011 // sw x30, 0(x8)
+
+        // pipeline table (expected):
+        // | cycle | IF | ID | EX | MEM | WB |  | PC |
+        // |-------|----|----|----|-----|----|--|----|
+        // | 1     | I1 |    |    |     |    |  | 0  |
+        // | 2     | I2 | I1 |    |     |    |  | 4  |
+        // | 3     | I3 | I2 | I1 |     |    |  | 8  |
+        // | 4     | .. | .. | .. | I1  |    |  |    | // I1 jumps pc to 8
+        // | 5     | I3 | .. | .. | ..  | I1 |  | 8  |
+        // | 6     | I4 | I3 | .. | ..  | .. |  | 12 |
+        // | 7     | I5 | I4 | I3 | ..  | .. |  | 16 |
+        // | 8     | I6 | I5 | I4 | I3  | .. |  | 20 |
+        // | 9     |    | I6 | I5 | I4  | I3 |  |    |
+        // | 10    | .. | .. | .. | I5  | I4 |  |    | // I5 jumps pc to 4
+        // | 11    | I2 | .. | .. | ..  | I5 |  | 4  |
+        // | 12    | I3 | I2 | .. | ..  | .. |  | 8  |
+        // | 13    | I4 | I3 | I2 | ..  | .. |  | 12 |
+        // | 14    | .. | .. | .. | I2  | .. |  |    | // I2 jumps pc to 20
+        // | 15    | I6 | .. | .. | ..  | I2 |  | 20 |
+        // | 16    |    | I6 | .. | ..  | .. |  |    |
+        // | 17    |    |    | I6 | ..  | .. |  |    |
+        // | 18    |    |    |    | I6  | .. |  |    |
+        // | 19    |    |    |    |     | I6 |  |    |
     }
 
     fn sample1_rf() -> Vec<(registers::RegisterMapping, u32)> {
@@ -129,22 +160,18 @@ mod tests {
             "total_clock_cycles 6 :\nx5 is modified to 0x1b\npc is modified to 0x14\n",
             cpu.run_step()?
         );
+        assert_eq!("total_clock_cycles 7 :\n", cpu.run_step()?);
         assert_eq!(
-            "total_clock_cycles 7 :\npc is modified to 0x18\n",
+            "total_clock_cycles 8 :\nx5 is modified to 0x2b\n",
             cpu.run_step()?
         );
         assert_eq!(
-            "total_clock_cycles 8 :\nx5 is modified to 0x2b\npc is modified to 0x1c\n",
+            "total_clock_cycles 9 :\nmemory 0x70 is modified to 0x2f\nx5 is modified to 0x2f\n",
             cpu.run_step()?
         );
-        assert_eq!(
-            "total_clock_cycles 9 :\nmemory 0x70 is modified to 0x2f\nx5 is modified to 0x2f\npc is modified to 0x20\n",
-            cpu.run_step()?
-        );
-        assert_eq!(
-            "total_clock_cycles 10 :\npc is modified to 0x24\n",
-            cpu.run_step()?
-        );
+        assert_eq!("total_clock_cycles 10 :\n", cpu.run_step()?);
+
+        assert!(cpu.is_done());
 
         Ok(())
     }
@@ -154,30 +181,97 @@ mod tests {
         let mut cpu = cpu::CPU::new(sample2_rom());
         cpu.initialize_rf(&sample2_rf());
 
+        assert_eq!("total_clock_cycles 1 :\n", cpu.run_step()?);
         assert_eq!(
-            "total_clock_cycles 1 :\nx1 is modified to 0x4\npc is modified to 0x8\n",
+            "total_clock_cycles 2 :\npc is modified to 0x4\n",
             cpu.run_step()?
         );
         assert_eq!(
-            "total_clock_cycles 2 :\nx10 is modified to 0xc\npc is modified to 0xc\n",
+            "total_clock_cycles 3 :\npc is modified to 0x8\n",
             cpu.run_step()?
         );
         assert_eq!(
-            "total_clock_cycles 3 :\nx30 is modified to 0x3\npc is modified to 0x10\n",
+            "total_clock_cycles 4 :\npipeline flushed\n",
             cpu.run_step()?
         );
         assert_eq!(
-            "total_clock_cycles 4 :\nx1 is modified to 0x14\npc is modified to 0x4\n",
+            "total_clock_cycles 5 :\nx1 is modified to 0x4\npc is modified to 0x8\n",
             cpu.run_step()?
         );
         assert_eq!(
-            "total_clock_cycles 5 :\nx1 is modified to 0x8\npc is modified to 0x14\n",
+            "total_clock_cycles 6 :\npc is modified to 0xc\n",
             cpu.run_step()?
         );
         assert_eq!(
-            "total_clock_cycles 6 :\nmemory 0x20 is modified to 0x3\npc is modified to 0x18\n",
+            "total_clock_cycles 7 :\npc is modified to 0x10\n",
             cpu.run_step()?
         );
+        assert_eq!(
+            "total_clock_cycles 8 :\npc is modified to 0x14\n",
+            cpu.run_step()?
+        );
+        assert_eq!(
+            "total_clock_cycles 9 :\nx10 is modified to 0xc\n",
+            cpu.run_step()?
+        );
+        assert_eq!(
+            "total_clock_cycles 10 :\nx30 is modified to 0x3\npipeline flushed\n",
+            cpu.run_step()?
+        );
+        assert_eq!(
+            "total_clock_cycles 11 :\nx1 is modified to 0x14\npc is modified to 0x4\n",
+            cpu.run_step()?
+        );
+        assert_eq!(
+            "total_clock_cycles 12 :\npc is modified to 0x8\n",
+            cpu.run_step()?
+        );
+        assert_eq!(
+            "total_clock_cycles 13 :\npc is modified to 0xc\n",
+            cpu.run_step()?
+        );
+        assert_eq!(
+            "total_clock_cycles 14 :\npipeline flushed\n",
+            cpu.run_step()?
+        );
+        assert_eq!(
+            "total_clock_cycles 15 :\nx1 is modified to 0x8\npc is modified to 0x14\n",
+            cpu.run_step()?
+        );
+        assert_eq!("total_clock_cycles 16 :\n", cpu.run_step()?);
+        assert_eq!("total_clock_cycles 17 :\n", cpu.run_step()?);
+        assert_eq!(
+            "total_clock_cycles 18 :\nmemory 0x20 is modified to 0x3\n",
+            cpu.run_step()?
+        );
+        assert_eq!("total_clock_cycles 19 :\n", cpu.run_step()?);
+
+        assert!(cpu.is_done());
+
+        //assert_eq!(
+        //    "total_clock_cycles 1 :\nx1 is modified to 0x4\npc is modified to 0x8\n",
+        //    cpu.run_step()?
+        //);
+        //assert_eq!(
+        //    "total_clock_cycles 2 :\nx10 is modified to 0xc\npc is modified to 0xc\n",
+        //    cpu.run_step()?
+        //);
+        //assert_eq!(
+        //    "total_clock_cycles 3 :\nx30 is modified to 0x3\npc is modified to 0x10\n",
+        //    cpu.run_step()?
+        //);
+        //assert_eq!(
+        //    "total_clock_cycles 4 :\nx1 is modified to 0x14\npc is modified to 0x4\n",
+        //    cpu.run_step()?
+        //);
+        //assert_eq!(
+        //    "total_clock_cycles 5 :\nx1 is modified to 0x8\npc is modified to 0x14\n",
+        //    cpu.run_step()?
+        //);
+        //assert_eq!(
+        //    "total_clock_cycles 6 :\nmemory 0x20 is modified to 0x3\npc is modified to 0x18\n",
+        //    cpu.run_step()?
+        //);
 
         Ok(())
     }
