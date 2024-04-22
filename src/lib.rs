@@ -14,19 +14,29 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     fn sample1_rom() -> Vec<u32> {
-        include_str!("../sample_part1.txt")
+        let mut rom = include_str!("../sample_part1.txt")
             .split("\n")
             .map(|line| utils::bit_vec_from_string(line).map(|bits| utils::bit_vec_to_int(&bits)))
             .collect::<Result<Vec<u32>>>()
-            .unwrap()
+            .unwrap();
+        // handle the case where the last line is empty
+        if rom.last() == Some(&0) {
+            rom.pop();
+        }
+        rom
     }
 
     fn sample2_rom() -> Vec<u32> {
-        include_str!("../sample_part2.txt")
+        let mut rom = include_str!("../sample_part2.txt")
             .split("\n")
             .map(|line| utils::bit_vec_from_string(line).map(|bits| utils::bit_vec_to_int(&bits)))
             .collect::<Result<Vec<u32>>>()
-            .unwrap()
+            .unwrap();
+        // handle the case where the last line is empty
+        if rom.last() == Some(&0) {
+            rom.pop();
+        }
+        rom
     }
 
     fn sample1_rf() -> Vec<(registers::RegisterMapping, u32)> {

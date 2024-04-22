@@ -164,8 +164,9 @@ impl CPU {
                 }
             }
 
-            // if all the stage registers are flushed, we can stop the simulation
-            todo!()
+            if self.pc >= self.i_mem.rom.len() as u32 * 4 - 4{
+                break;
+            }
         }
 
         println!("program terminated:");
