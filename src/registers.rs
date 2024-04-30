@@ -4,13 +4,11 @@ use std::{
 };
 
 use anyhow::bail;
-use strum_macros::VariantNames;
 
 /// the number of registers in the RISC-V ISA
 pub const REGISTERS_COUNT: u8 = 32;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, PartialOrd, Ord, VariantNames)]
-#[strum(serialize_all = "lowercase")]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum RegisterMapping {
     Zero = 0,
