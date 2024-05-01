@@ -14,10 +14,10 @@ pub type Report = String;
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 pub struct StageRegisters {
     pub ifid: IFID,
-    pub idex: IDEX,
-    pub exmem: EXMEM,
+    pub idex: IdEx,
+    pub exmem: ExMem,
     pub memwb: MEMWB,
-    pub wb_stage: WB,
+    pub wb_stage: Wb,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
@@ -35,7 +35,7 @@ pub enum IFID {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
-pub enum IDEX {
+pub enum IdEx {
     /// the values that are passed from the ID stage to the EX stage.
     Id {
         instruction: Instruction,
@@ -58,7 +58,7 @@ pub enum IDEX {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
-pub enum EXMEM {
+pub enum ExMem {
     /// the values that are passed from the EX stage to the MEM stage.
     Ex {
         instruction: Instruction,
@@ -110,7 +110,7 @@ pub enum MEMWB {
 /// since we execute stages backwards, if we want to forward data from the MEM/WB stage to the ID/EX stage,
 /// we need to store the value written to the register file in the WB stage.
 /// Because otherwise, the value will be overwritten before we can forward it.
-pub enum WB {
+pub enum Wb {
     /// information needed by the forwarding unit
     Mem {
         instruction: Instruction,

@@ -1,7 +1,7 @@
 use crate::{
     instruction::Instruction,
     registers::RegisterMapping,
-    stages::{EXMEM, IDEX, WB},
+    stages::{ExMem, IdEx, Wb},
 };
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
@@ -9,8 +9,8 @@ use crate::{
 pub enum ForwardA {
     #[default]
     None = 0b00,
-    EXMEM = 0b10,
-    MEMWB = 0b01,
+    ExMem = 0b10,
+    MemWb = 0b01,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
@@ -18,25 +18,25 @@ pub enum ForwardA {
 pub enum ForwardB {
     #[default]
     None = 0b00,
-    EXMEM = 0b10,
-    MEMWB = 0b01,
+    ExMem = 0b10,
+    MemWb = 0b01,
 }
 
 /// the forwarding unit determines whether to forward data from the EX/MEM and/or MEM/WB stages to the ID/EX stage.
-pub fn forwarding_unit(exmem: EXMEM, wb: WB, idex: IDEX) -> (ForwardA, ForwardB) {
+pub fn forwarding_unit(exmem: ExMem, wb: Wb, idex: IdEx) -> (ForwardA, ForwardB) {
     // Initialize forwarding variables
     let mut forward_a = ForwardA::None;
     let mut forward_b = ForwardB::None;
 
     // Extract source registers from IDEX stage
     let (idex_source_reg1, idex_source_reg2) = match idex {
-        IDEX::Id { rs1, rs2, .. } => (rs1, rs2),
+        IdEx::Id { rs1, rs2, .. } => (rs1, rs2),
         _ => (None, None),
     };
 
     // Extract register write and destination register from EXMEM stage
     let (exmem_regwrite, exmem_dest_reg) = match exmem {
-        EXMEM::Ex {
+        ExMem::Ex {
             control_signals,
             instruction,
             ..
@@ -48,7 +48,7 @@ pub fn forwarding_unit(exmem: EXMEM, wb: WB, idex: IDEX) -> (ForwardA, ForwardB)
 
     // Extract register write and destination register from MEMWB stage
     let (memwb_regwrite, memwb_dest_reg) = match wb {
-        WB::Mem {
+        Wb::Mem {
             control_signals,
             instruction,
             ..
@@ -61,16 +61,16 @@ pub fn forwarding_unit(exmem: EXMEM, wb: WB, idex: IDEX) -> (ForwardA, ForwardB)
     // Determine forwarding for source register 1
     match idex_source_reg1 {
         None | Some(RegisterMapping::Zero) => (),
-        Some(rs1) if exmem_regwrite && exmem_dest_reg == rs1 => forward_a = ForwardA::EXMEM,
-        Some(rs1) if memwb_regwrite && memwb_dest_reg == rs1 => forward_a = ForwardA::MEMWB,
+        Some(rs1) if exmem_regwrite && exmem_dest_reg == rs1 => forward_a = ForwardA::ExMem,
+        Some(rs1) if memwb_regwrite && memwb_dest_reg == rs1 => forward_a = ForwardA::MemWb,
         _ => (),
     }
 
     // Determine forwarding for source register 2
     match idex_source_reg2 {
         None | Some(RegisterMapping::Zero) => (),
-        Some(rs2) if exmem_regwrite && exmem_dest_reg == rs2 => forward_b = ForwardB::EXMEM,
-        Some(rs2) if memwb_regwrite && memwb_dest_reg == rs2 => forward_b = ForwardB::MEMWB,
+        Some(rs2) if exmem_regwrite && exmem_dest_reg == rs2 => forward_b = ForwardB::ExMem,
+        Some(rs2) if memwb_regwrite && memwb_dest_reg == rs2 => forward_b = ForwardB::MemWb,
         _ => (),
     }
 
@@ -87,6 +87,7 @@ pub fn forwarding_unit(exmem: EXMEM, wb: WB, idex: IDEX) -> (ForwardA, ForwardB)
 /// * `ifid_rs2` - the source register 2 from the IF/ID stage
 /// * `idex_rd` - the destination register from the ID/EX stage
 /// * `idex_memread` - a boolean indicating whether the instruction in the ID/EX stage writes to memory
+#[allow(clippy::module_name_repetitions)]
 pub struct HazardDetectionUnit {
     ifid_rs1: Option<RegisterMapping>,
     ifid_rs2: Option<RegisterMapping>,
@@ -96,17 +97,17 @@ pub struct HazardDetectionUnit {
 
 impl HazardDetectionUnit {
     /// prime the hazard detection unit with the relevant current pipeline state
-    pub fn prime(decoded_instruction: Instruction, idex_reg: IDEX) -> Self {
+    pub const fn prime(decoded_instruction: Instruction, idex_reg: IdEx) -> Self {
         let ifid_rs1 = decoded_instruction.rs1();
         let ifid_rs2 = decoded_instruction.rs2();
 
         let idex_rd = match idex_reg {
-            IDEX::Id { instruction, .. } => instruction.rd(),
+            IdEx::Id { instruction, .. } => instruction.rd(),
             _ => None,
         };
 
         let idex_memread = match idex_reg {
-            IDEX::Id {
+            IdEx::Id {
                 control_signals, ..
             } => control_signals.mem_read,
             _ => false,

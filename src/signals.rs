@@ -2,6 +2,7 @@ use anyhow::Result;
 use ux::u7;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
+#[allow(clippy::module_name_repetitions)]
 /// a struct that holds the control signals that the Control Unit generates.
 ///
 /// A decent chunk of these are actually entirely unnessary for this implementation, but are included nonetheless for completeness.
@@ -94,13 +95,14 @@ pub enum PCSrc {
 
 impl PCSrc {
     /// returns the next PC value.
-    pub fn next(&self, pc: u32) -> u32 {
+    #[must_use]
+    pub const fn next(&self, pc: u32) -> u32 {
         match self {
-            PCSrc::Init => 0,
-            PCSrc::Next => pc + 4,
-            PCSrc::BranchTarget { offset } => pc.wrapping_add_signed(*offset),
-            PCSrc::JumpTarget { target } => *target,
-            PCSrc::End => pc,
+            Self::Init => 0,
+            Self::Next => pc + 4,
+            Self::BranchTarget { offset } => pc.wrapping_add_signed(*offset),
+            Self::JumpTarget { target } => *target,
+            Self::End => pc,
         }
     }
 }
@@ -156,13 +158,13 @@ pub enum WriteBackSrc {
 pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
     match u8::from(opcode) {
         // lui
-        0b0110111 => Err(anyhow::anyhow!("lui instruction not supported yet")),
+        0b011_0111 => Err(anyhow::anyhow!("lui instruction not supported yet")),
 
         // auipc
-        0b0010111 => Err(anyhow::anyhow!("auipc instruction not supported yet")),
+        0b001_0111 => Err(anyhow::anyhow!("auipc instruction not supported yet")),
 
         // jal
-        0b1101111 => Ok(ControlSignals {
+        0b110_1111 => Ok(ControlSignals {
             reg_write: true,
             branch_jump: BranchJump::Jal,
             alu_src_a: ALUSrcA::PC,
@@ -174,7 +176,7 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
         }),
 
         // jalr
-        0b1100111 => Ok(ControlSignals {
+        0b110_0111 => Ok(ControlSignals {
             reg_write: true,
             branch_jump: BranchJump::Jal,
             alu_src_a: ALUSrcA::Register,
@@ -186,7 +188,7 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
         }),
 
         // branch
-        0b1100011 => Ok(ControlSignals {
+        0b110_0011 => Ok(ControlSignals {
             reg_write: false,
             branch_jump: BranchJump::Branch,
             alu_src_a: ALUSrcA::Register,
@@ -198,7 +200,7 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
         }),
 
         // load
-        0b0000011 => Ok(ControlSignals {
+        0b000_0011 => Ok(ControlSignals {
             reg_write: true,
             branch_jump: BranchJump::No,
             alu_src_a: ALUSrcA::Register,
@@ -210,7 +212,7 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
         }),
 
         // store
-        0b0100011 => Ok(ControlSignals {
+        0b010_0011 => Ok(ControlSignals {
             reg_write: false,
             branch_jump: BranchJump::No,
             alu_src_a: ALUSrcA::Register,
@@ -222,7 +224,7 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
         }),
 
         // R-type
-        0b0110011 => Ok(ControlSignals {
+        0b011_0011 => Ok(ControlSignals {
             reg_write: true,
             branch_jump: BranchJump::No,
             alu_src_a: ALUSrcA::Register,
@@ -234,7 +236,7 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
         }),
 
         // I-type
-        0b0010011 => Ok(ControlSignals {
+        0b001_0011 => Ok(ControlSignals {
             reg_write: true,
             branch_jump: BranchJump::No,
             alu_src_a: ALUSrcA::Register,

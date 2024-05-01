@@ -52,6 +52,19 @@ pub enum Instruction {
 
 impl Instruction {
     #[allow(clippy::too_many_lines)]
+    /// Create a new instruction from a machine code.
+    ///
+    /// # Arguments
+    ///
+    /// * `machine_code` - the machine code of the instruction.
+    ///
+    /// # Returns
+    ///
+    /// * `Result<Self>` - the instruction that was created.
+    ///
+    /// # Errors
+    ///
+    /// * if the opcode is not recognized / not supported
     pub fn from_machine_code(machine_code: u32) -> Result<Self> {
         // extract the opcode
         let opcode: u7 = u7::new((machine_code & 0b111_1111) as u8);
@@ -137,8 +150,9 @@ impl Instruction {
             // SB-type instructions
             0b110_0011 => {
                 // convert to i32 so that our shift operations are sign extended, and we're explicity okay with the possible wrap
-                #[allow(clippy::cast_possible_wrap)]
+                #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
                 let machine_code: i32 = machine_code as i32;
+                #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
                 let imm: i13 = i13::new(
                     ((
                         /* extract the lowest 12 bits of the immediate from the machine code */
@@ -197,7 +211,8 @@ impl Instruction {
         }
     }
 
-    pub fn opcode(&self) -> Option<u7> {
+    #[must_use]
+    pub const fn opcode(&self) -> Option<u7> {
         match self {
             Self::RType { opcode, .. }
             | Self::IType { opcode, .. }
@@ -208,7 +223,8 @@ impl Instruction {
         }
     }
 
-    pub fn funct3(&self) -> Option<u3> {
+    #[must_use]
+    pub const fn funct3(&self) -> Option<u3> {
         match self {
             Self::RType { funct3, .. }
             | Self::IType { funct3, .. }
@@ -218,7 +234,8 @@ impl Instruction {
         }
     }
 
-    pub fn funct7(&self) -> Option<u7> {
+    #[must_use]
+    pub const fn funct7(&self) -> Option<u7> {
         match self {
             Self::RType { funct7, .. }
             | Self::IType {
@@ -229,7 +246,8 @@ impl Instruction {
         }
     }
 
-    pub fn shamt(&self) -> Option<u5> {
+    #[must_use]
+    pub const fn shamt(&self) -> Option<u5> {
         match self {
             Self::IType {
                 shamt: Some(shamt), ..
@@ -238,7 +256,8 @@ impl Instruction {
         }
     }
 
-    pub fn rd(&self) -> Option<RegisterMapping> {
+    #[must_use]
+    pub const fn rd(&self) -> Option<RegisterMapping> {
         match self {
             Self::RType { rd, .. }
             | Self::IType { rd, .. }
@@ -248,7 +267,8 @@ impl Instruction {
         }
     }
 
-    pub fn rs1(&self) -> Option<RegisterMapping> {
+    #[must_use]
+    pub const fn rs1(&self) -> Option<RegisterMapping> {
         match self {
             Self::RType { rs1, .. }
             | Self::IType { rs1, .. }
@@ -258,7 +278,8 @@ impl Instruction {
         }
     }
 
-    pub fn rs2(&self) -> Option<RegisterMapping> {
+    #[must_use]
+    pub const fn rs2(&self) -> Option<RegisterMapping> {
         match self {
             Self::RType { rs2, .. } | Self::SType { rs2, .. } | Self::SBType { rs2, .. } => {
                 Some(*rs2)

@@ -7,7 +7,7 @@ use crate::{
     instruction::Instruction,
     registers::{RegisterFile, RegisterMapping},
     signals::{control_unit, ALUControl, ALUSrcA, ALUSrcB, BranchJump, PCSrc},
-    stages::{Immediate, StageRegisters, EXMEM, IDEX, IFID, MEMWB, WB},
+    stages::{ExMem, IdEx, Immediate, StageRegisters, Wb, IFID, MEMWB},
 };
 
 /// a string that holds a report of what happened in the CPU during a clock cycle.
@@ -16,25 +16,39 @@ pub type Report = String;
 /// an array that holds the instructions of the program.
 /// Each instruction is a 32-bit integer.
 /// The program counter (PC) will be used to index this array to get the current instruction.
-/// The PC will be updated by the Fetch() function to get the next instruction in the next cycle.
+/// The PC will be updated by the `Fetch()` function to get the next instruction in the next cycle.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct InstructionMemory {
     rom: Vec<u32>,
 }
 
 impl InstructionMemory {
+    #[must_use]
     pub fn new(rom: Vec<u32>) -> Self {
         Self { rom }
     }
 
+    /// get the instruction at the given program counter value.
+    ///
+    /// # Panics
+    ///
+    /// * if the program counter value is not aligned to 4 bytes
+    ///
+    /// # Arguments
+    ///
+    /// * `pc` - the program counter value
+    ///
+    /// # Returns
+    ///
+    /// * `Some(u32)` - the instruction at the given program counter value
+    #[must_use]
     pub fn get_instruction(&self, pc: u32) -> Option<u32> {
         if pc as usize / 4 >= self.rom.len() {
             // we've reached the end of the program
             return None;
         }
-        if pc % 4 != 0 {
-            panic!("PC not aligned to 4 bytes");
-        }
+        // check invariant
+        assert!(pc % 4 == 0, "PC not aligned to 4 bytes");
 
         Some(self.rom[pc as usize / 4])
     }
@@ -48,28 +62,53 @@ pub struct DataMemory {
 }
 
 impl DataMemory {
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self { d_mem: [0; 32] }
     }
 
+    /// read a 32-bit value from the data memory
+    ///
+    /// # Panics
+    ///
+    /// * if the address is out of bounds or not aligned to 4 bytes
+    ///
+    /// # Arguments
+    ///
+    /// * `address` - the address to read from
+    ///
+    /// # Returns
+    ///
+    /// the 32-bit value at the address
+    #[must_use]
     pub fn read(&self, address: u32) -> u32 {
-        if address as usize / 4 >= self.d_mem.len() {
-            panic!("Address out of bounds");
-        }
-        if address % 4 != 0 {
-            panic!("Address not aligned to 4 bytes");
-        }
+        // check invariants first
+        assert!(
+            address as usize / 4 < self.d_mem.len(),
+            "Address out of bounds"
+        );
+        assert!(address % 4 == 0, "Address not aligned to 4 bytes");
 
         self.d_mem[address as usize / 4]
     }
 
+    /// write a 32-bit value to the data memory
+    ///
+    /// # Panics
+    ///
+    /// * if the address is out of bounds or not aligned to 4 bytes
+    ///
+    /// # Arguments
+    ///
+    /// * `address` - the address to write to
+    /// * `value` - the value to write
     pub fn write(&mut self, address: u32, value: u32) {
-        if address as usize / 4 >= self.d_mem.len() {
-            panic!("Address out of bounds");
-        }
-        if address % 4 != 0 {
-            panic!("Address not aligned to 4 bytes");
-        }
+        // check invariants first
+        assert!(
+            address as usize / 4 < self.d_mem.len(),
+            "Address out of bounds"
+        );
+        assert!(address % 4 == 0, "Address not aligned to 4 bytes");
 
         self.d_mem[address as usize / 4] = value;
     }
@@ -118,6 +157,7 @@ pub struct CPU {
 
 impl CPU {
     /// Initialize the CPU state
+    #[must_use]
     pub fn new(rom: Vec<u32>) -> Self {
         Self {
             pc: 0,
@@ -141,16 +181,18 @@ impl CPU {
         }
     }
 
-    pub fn get_total_clock_cycles(&self) -> u64 {
+    #[must_use]
+    pub const fn get_total_clock_cycles(&self) -> u64 {
         self.total_clock_cycles
     }
 
     /// is the program over
+    #[must_use]
     pub fn is_done(&self) -> bool {
         self.pc_src == PCSrc::End
             && matches!(self.stage_registers.ifid, IFID::Flush)
-            && matches!(self.stage_registers.idex, IDEX::Flush)
-            && matches!(self.stage_registers.exmem, EXMEM::Flush)
+            && matches!(self.stage_registers.idex, IdEx::Flush)
+            && matches!(self.stage_registers.exmem, ExMem::Flush)
             && matches!(self.stage_registers.memwb, MEMWB::Flush)
     }
 
@@ -160,10 +202,10 @@ impl CPU {
             println!();
             match self.run_step() {
                 Ok(report) => {
-                    println!("{}", report);
+                    println!("{report}");
                 }
                 Err(e) => {
-                    eprintln!("Error: {}", e);
+                    eprintln!("Error: {e}");
                     break;
                 }
             }
@@ -178,6 +220,14 @@ impl CPU {
     }
 
     /// Body of the main loop of the CPU simulator, separated for testing purposes
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Report)` - a report of what happened in the CPU during a clock cycle
+    ///
+    /// # Errors
+    ///
+    /// * if there is an error in the CPU pipeline
     pub fn run_step(&mut self) -> Result<Report> {
         let mut report = String::new();
 
@@ -204,7 +254,7 @@ impl CPU {
     /// the Fetch stage of the CPU.
     fn fetch(&mut self) -> String {
         // check if the decode stage indicates a stall
-        if let IDEX::Stall = self.stage_registers.idex {
+        if self.stage_registers.idex == IdEx::Stall {
             // in this case, we don't need to do anything in the fetch stage
             return String::from("pipeline stalled in the decode stage\n");
         }
@@ -255,7 +305,7 @@ impl CPU {
         // if the fetch stage failed, flush
         let (instruction_code, pc) = match self.stage_registers.ifid {
             IFID::Flush => {
-                self.stage_registers.idex = IDEX::Flush;
+                self.stage_registers.idex = IdEx::Flush;
                 return Ok(());
             }
             IFID::If {
@@ -272,7 +322,7 @@ impl CPU {
             .detect_stall_conditions();
 
         if stall_required {
-            self.stage_registers.idex = IDEX::Stall;
+            self.stage_registers.idex = IdEx::Stall;
             return Ok(());
         }
 
@@ -295,10 +345,7 @@ impl CPU {
 
         // sign extend the immediate value
         let immediate = match instruction {
-            Instruction::IType { imm, .. } => {
-                Immediate::SignedImmediate(i32::from(imm) << (32 - 12) >> (32 - 12))
-            }
-            Instruction::SType { imm, .. } => {
+            Instruction::IType { imm, .. } | Instruction::SType { imm, .. } => {
                 Immediate::SignedImmediate(i32::from(imm) << (32 - 12) >> (32 - 12))
             }
             Instruction::SBType { imm, .. } => {
@@ -307,7 +354,9 @@ impl CPU {
             Instruction::UType { imm, .. } => {
                 Immediate::UpperImmediate(u32::from(imm) << (32 - 20))
             }
-            Instruction::UJType { imm, .. } => {
+            Instruction::UJType { imm, .. } =>
+            {
+                #[allow(clippy::cast_possible_wrap)]
                 Immediate::JumpOffset((u32::from(imm) as i32) << (32 - 21) >> (32 - 21))
             }
             Instruction::RType { .. } => Immediate::None,
@@ -316,7 +365,7 @@ impl CPU {
         // set the control signals
         let control_signals = control_unit(instruction.opcode().unwrap())?;
 
-        self.stage_registers.idex = IDEX::Id {
+        self.stage_registers.idex = IdEx::Id {
             instruction,
             rs1,
             read_data_1,
@@ -337,12 +386,12 @@ impl CPU {
         // if the decode stage failed, flush
         let (instruction, read_data_1, read_data_2, immediate, pc, control_signals) =
             match self.stage_registers.idex {
-                IDEX::Flush | IDEX::Stall => {
-                    self.stage_registers.exmem = EXMEM::Flush;
+                IdEx::Flush | IdEx::Stall => {
+                    self.stage_registers.exmem = ExMem::Flush;
 
                     return Ok(());
                 }
-                IDEX::Id {
+                IdEx::Id {
                     instruction,
                     read_data_1,
                     read_data_2,
@@ -380,8 +429,8 @@ impl CPU {
             self.stage_registers.exmem,
             self.stage_registers.wb_stage,
         ) {
-            (ForwardA::EXMEM, EXMEM::Ex { alu_result, .. }, _) => Some(alu_result),
-            (ForwardA::MEMWB, _, WB::Mem { wb_data, .. }) => wb_data,
+            (ForwardA::ExMem, ExMem::Ex { alu_result, .. }, _) => Some(alu_result),
+            (ForwardA::MemWb, _, Wb::Mem { wb_data, .. }) => wb_data,
             _ => read_data_1,
         };
         let read_data_2 = match (
@@ -389,8 +438,8 @@ impl CPU {
             self.stage_registers.exmem,
             self.stage_registers.wb_stage,
         ) {
-            (ForwardB::EXMEM, EXMEM::Ex { alu_result, .. }, _) => Some(alu_result),
-            (ForwardB::MEMWB, _, WB::Mem { wb_data, .. }) => wb_data,
+            (ForwardB::ExMem, ExMem::Ex { alu_result, .. }, _) => Some(alu_result),
+            (ForwardB::MemWb, _, Wb::Mem { wb_data, .. }) => wb_data,
             _ => read_data_2,
         };
 
@@ -403,11 +452,11 @@ impl CPU {
         let alu_operand_b: u32 = match control_signals.alu_src_b {
             ALUSrcB::Register => read_data_2.unwrap(),
             ALUSrcB::Immediate => match immediate {
-                Immediate::SignedImmediate(imm) => imm as u32,
+                #[allow(clippy::cast_sign_loss)]
+                Immediate::SignedImmediate(imm) | Immediate::JumpOffset(imm) => imm as u32,
                 Immediate::BranchOffset(_) => {
                     bail!("branch offset should not be used as ALU operand")
                 }
-                Immediate::JumpOffset(imm) => imm as u32,
                 Immediate::UpperImmediate(imm) => imm,
                 Immediate::None => bail!("no immediate value found"),
             },
@@ -430,7 +479,7 @@ impl CPU {
             immediate,
         )?;
 
-        self.stage_registers.exmem = EXMEM::Ex {
+        self.stage_registers.exmem = ExMem::Ex {
             instruction,
             alu_result,
             alu_zero,
@@ -447,11 +496,11 @@ impl CPU {
         // if the execute stage failed, flush
         let (instruction, alu_result, read_data_2, pc, control_signals) =
             match self.stage_registers.exmem {
-                EXMEM::Flush => {
+                ExMem::Flush => {
                     self.stage_registers.memwb = MEMWB::Flush;
                     return String::new();
                 }
-                EXMEM::Ex {
+                ExMem::Ex {
                     instruction,
                     alu_result,
                     alu_zero: _,
@@ -464,7 +513,7 @@ impl CPU {
                     match pc_src {
                         PCSrc::BranchTarget { .. } | PCSrc::JumpTarget { .. } => {
                             self.stage_registers.ifid = IFID::Flush;
-                            self.stage_registers.idex = IDEX::Flush;
+                            self.stage_registers.idex = IdEx::Flush;
                             self.if_flush = true;
                         }
                         _ => (),
@@ -535,7 +584,7 @@ impl CPU {
         let (instruction, alu_result, mem_read_data, pc, control_signals) =
             match self.stage_registers.memwb {
                 MEMWB::Flush => {
-                    self.stage_registers.wb_stage = WB::Flush;
+                    self.stage_registers.wb_stage = Wb::Flush;
                     return String::new();
                 }
                 MEMWB::Mem {
@@ -547,12 +596,12 @@ impl CPU {
                 } => (instruction, alu_result, mem_read_data, pc, control_signals),
             };
 
-        let report = match (control_signals.reg_write, instruction.rd()) {
+        match (control_signals.reg_write, instruction.rd()) {
             (true, Some(rd)) => {
                 // write to register file
                 match control_signals.wb_src {
                     crate::signals::WriteBackSrc::NA => {
-                        self.stage_registers.wb_stage = WB::Mem {
+                        self.stage_registers.wb_stage = Wb::Mem {
                             instruction,
                             wb_data: None,
                             control_signals,
@@ -560,17 +609,17 @@ impl CPU {
                         String::new()
                     }
                     crate::signals::WriteBackSrc::ALU => {
-                        self.stage_registers.wb_stage = WB::Mem {
+                        self.stage_registers.wb_stage = Wb::Mem {
                             instruction,
                             wb_data: Some(alu_result),
                             control_signals,
                         };
                         // write the ALU result to the register file
                         self.rf.write(rd, alu_result);
-                        format!("{} is modified to 0x{:x}\n", rd, alu_result)
+                        format!("{rd} is modified to 0x{alu_result:x}\n")
                     }
                     crate::signals::WriteBackSrc::Mem => {
-                        self.stage_registers.wb_stage = WB::Mem {
+                        self.stage_registers.wb_stage = Wb::Mem {
                             instruction,
                             wb_data: mem_read_data,
                             control_signals,
@@ -584,7 +633,7 @@ impl CPU {
                         )
                     }
                     crate::signals::WriteBackSrc::PC => {
-                        self.stage_registers.wb_stage = WB::Mem {
+                        self.stage_registers.wb_stage = Wb::Mem {
                             instruction,
                             wb_data: Some(pc + 4),
                             control_signals,
@@ -594,17 +643,11 @@ impl CPU {
                     }
                 }
             }
-            (true, None) => {
+            (true, None) | (false, _) => {
                 // no write to register file
                 String::new()
             }
-            (false, _) => {
-                // no write to register file
-                String::new()
-            }
-        };
-
-        report
+        }
     }
 }
 
@@ -880,7 +923,7 @@ mod tests {
         cpu.decode().unwrap();
 
         match cpu.stage_registers.idex {
-            IDEX::Id {
+            IdEx::Id {
                 instruction,
                 read_data_1,
                 read_data_2,
@@ -917,7 +960,7 @@ mod tests {
         cpu.execute().unwrap();
 
         match cpu.stage_registers.exmem {
-            EXMEM::Ex {
+            ExMem::Ex {
                 instruction,
                 alu_result,
                 alu_zero,

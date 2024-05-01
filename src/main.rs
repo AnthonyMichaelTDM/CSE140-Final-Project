@@ -47,7 +47,7 @@ fn main() -> Result<()> {
 
     // parse the file
     let mut i_mem = file
-        .split("\n")
+        .split('\n')
         .map(|line| bit_vec_from_string(line).map(|bits| bit_vec_to_int(&bits)))
         .collect::<Result<Vec<u32>>>()?;
     // handle the case where the last line is empty
