@@ -248,31 +248,6 @@ mod tests {
 
         assert!(cpu.is_done());
 
-        //assert_eq!(
-        //    "total_clock_cycles 1 :\nx1 is modified to 0x4\npc is modified to 0x8\n",
-        //    cpu.run_step()?
-        //);
-        //assert_eq!(
-        //    "total_clock_cycles 2 :\nx10 is modified to 0xc\npc is modified to 0xc\n",
-        //    cpu.run_step()?
-        //);
-        //assert_eq!(
-        //    "total_clock_cycles 3 :\nx30 is modified to 0x3\npc is modified to 0x10\n",
-        //    cpu.run_step()?
-        //);
-        //assert_eq!(
-        //    "total_clock_cycles 4 :\nx1 is modified to 0x14\npc is modified to 0x4\n",
-        //    cpu.run_step()?
-        //);
-        //assert_eq!(
-        //    "total_clock_cycles 5 :\nx1 is modified to 0x8\npc is modified to 0x14\n",
-        //    cpu.run_step()?
-        //);
-        //assert_eq!(
-        //    "total_clock_cycles 6 :\nmemory 0x20 is modified to 0x3\npc is modified to 0x18\n",
-        //    cpu.run_step()?
-        //);
-
         Ok(())
     }
 }
