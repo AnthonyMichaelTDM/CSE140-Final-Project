@@ -3,6 +3,7 @@ use ux::{i12, i13, u20, u21, u3, u5, u7};
 
 use crate::registers::RegisterMapping;
 
+/// An enum that represents the different types of instructions that can be executed by the CPU.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum Instruction {
     RType {
@@ -16,7 +17,7 @@ pub enum Instruction {
     IType {
         /// only used for the shift instructions
         funct7: Option<u7>,
-        // only used for the shift instructions
+        /// only used for the shift instructions
         shamt: Option<u5>,
         imm: i12,
         rs1: RegisterMapping,
@@ -51,20 +52,20 @@ pub enum Instruction {
 }
 
 impl Instruction {
-    #[allow(clippy::too_many_lines)]
-    /// Create a new instruction from a machine code.
+    /// Convert a 32-bit machine code instruction into an `Instruction` enum variant.
     ///
     /// # Arguments
     ///
-    /// * `machine_code` - the machine code of the instruction.
+    /// * `machine_code` - the 32-bit machine code instruction
     ///
     /// # Returns
     ///
-    /// * `Result<Self>` - the instruction that was created.
+    /// * `Result<Instruction>` - The decoded `Instruction`, if the machine code is valid. Otherwise, an error is returned.
     ///
     /// # Errors
     ///
-    /// * if the opcode is not recognized / not supported
+    /// This function will return an error if the machine code is invalid.
+    #[allow(clippy::too_many_lines)]
     pub fn from_machine_code(machine_code: u32) -> Result<Self> {
         // extract the opcode
         let opcode: u7 = u7::new((machine_code & 0b111_1111) as u8);
@@ -211,18 +212,28 @@ impl Instruction {
         }
     }
 
+    /// Get the opcode of the instruction.
+    ///
+    /// # Returns
+    ///
+    /// * `u7` - the opcode of the instruction.
     #[must_use]
-    pub const fn opcode(&self) -> Option<u7> {
+    pub const fn opcode(&self) -> u7 {
         match self {
             Self::RType { opcode, .. }
             | Self::IType { opcode, .. }
             | Self::SType { opcode, .. }
             | Self::SBType { opcode, .. }
             | Self::UType { opcode, .. }
-            | Self::UJType { opcode, .. } => Some(*opcode),
+            | Self::UJType { opcode, .. } => *opcode,
         }
     }
 
+    /// Get the funct3 field of the instruction.
+    ///
+    /// # Returns
+    ///
+    /// * `Option<u3>` - the funct3 field of the instruction, if it has one.
     #[must_use]
     pub const fn funct3(&self) -> Option<u3> {
         match self {
@@ -234,6 +245,11 @@ impl Instruction {
         }
     }
 
+    /// Get the funct7 field of the instruction.
+    ///
+    /// # Returns
+    ///
+    /// * `Option<u7>` - the funct7 field of the instruction, if it has one.
     #[must_use]
     pub const fn funct7(&self) -> Option<u7> {
         match self {
@@ -246,6 +262,11 @@ impl Instruction {
         }
     }
 
+    /// Get the shamt field of the instruction.
+    ///
+    /// # Returns
+    ///
+    /// * `Option<u5>` - the shamt field of the instruction, if it has one.
     #[must_use]
     pub const fn shamt(&self) -> Option<u5> {
         match self {
@@ -256,6 +277,11 @@ impl Instruction {
         }
     }
 
+    /// Get the rd field of the instruction.
+    ///
+    /// # Returns
+    ///
+    /// * `Option<RegisterMapping>` - the rd field of the instruction, if it has one.
     #[must_use]
     pub const fn rd(&self) -> Option<RegisterMapping> {
         match self {
@@ -267,6 +293,11 @@ impl Instruction {
         }
     }
 
+    /// Get the rs1 field of the instruction.
+    ///
+    /// # Returns
+    ///
+    /// * `Option<RegisterMapping>` - the rs1 field of the instruction, if it has one.
     #[must_use]
     pub const fn rs1(&self) -> Option<RegisterMapping> {
         match self {
@@ -278,6 +309,11 @@ impl Instruction {
         }
     }
 
+    /// Get the rs2 field of the instruction.
+    ///
+    /// # Returns
+    ///
+    /// * `Option<RegisterMapping>` - the rs2 field of the instruction, if it has one.
     #[must_use]
     pub const fn rs2(&self) -> Option<RegisterMapping> {
         match self {

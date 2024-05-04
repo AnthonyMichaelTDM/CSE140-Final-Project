@@ -7,7 +7,7 @@ use crate::{
     instruction::Instruction,
     registers::{RegisterFile, RegisterMapping},
     signals::{control_unit, ALUControl, ALUSrcA, ALUSrcB, BranchJump, PCSrc},
-    stages::{ExMem, IdEx, Immediate, StageRegisters, Wb, IFID, MEMWB},
+    stages::{ExMem, IdEx, IfId, Immediate, MemWb, StageRegisters, Wb},
 };
 
 /// a string that holds a report of what happened in the CPU during a clock cycle.
@@ -23,6 +23,15 @@ pub struct InstructionMemory {
 }
 
 impl InstructionMemory {
+    /// create a new `InstructionMemory` instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `rom` - the program instructions
+    ///
+    /// # Returns
+    ///
+    /// a new `InstructionMemory` instance
     #[must_use]
     pub fn new(rom: Vec<u32>) -> Self {
         Self { rom }
@@ -62,6 +71,11 @@ pub struct DataMemory {
 }
 
 impl DataMemory {
+    /// create a new `DataMemory` instance.
+    ///
+    /// # Returns
+    ///
+    /// a new `DataMemory` instance, initialized with all zeros
     #[must_use]
     pub const fn new() -> Self {
         Self { d_mem: [0; 32] }
@@ -114,6 +128,7 @@ impl DataMemory {
     }
 }
 
+/// a struct that represents the CPU.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct CPU {
     /// the program counter value of the current instruction.
@@ -132,7 +147,7 @@ pub struct CPU {
 
     /// an integer array that has 32 entries.
     /// This register file array will be initialized to have all zeros unless otherwise specified.
-    /// This register file will be updated by WriteBack() function.
+    /// This register file will be updated by `write_back()` function.
     /// This register file can be indexed by with `RegisterMapping` enum variants for ergonomics.
     rf: RegisterFile,
     /// an integer array that has 32 entries.
@@ -157,6 +172,14 @@ pub struct CPU {
 
 impl CPU {
     /// Initialize the CPU state
+    ///
+    /// # Arguments
+    ///
+    /// * `rom` - the program instructions
+    ///
+    /// # Returns
+    ///
+    /// a new `CPU` instance
     #[must_use]
     pub fn new(rom: Vec<u32>) -> Self {
         Self {
@@ -171,32 +194,51 @@ impl CPU {
         }
     }
 
+    /// Initialize the register file with the given mappings
+    ///
+    /// exposes the `initialize` method of the `RegisterFile` struct
     pub fn initialize_rf(&mut self, mappings: &[(RegisterMapping, u32)]) {
         self.rf.initialize(mappings);
     }
 
+    /// Initialize the data memory with the given data
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - a list of tuples where the first element is the address to write to and the second element is the value to write
     pub fn initialize_dmem(&mut self, data: &[(u32, u32)]) {
         for (address, value) in data {
             self.d_mem.write(*address, *value);
         }
     }
 
+    /// # Returns
+    ///
+    /// the total number of clock cycles that the CPU has executed
     #[must_use]
     pub const fn get_total_clock_cycles(&self) -> u64 {
         self.total_clock_cycles
     }
 
     /// is the program over
+    ///
+    /// # Returns
+    ///
+    /// `true` if the program is over, `false` otherwise
     #[must_use]
     pub fn is_done(&self) -> bool {
         self.pc_src == PCSrc::End
-            && matches!(self.stage_registers.ifid, IFID::Flush)
+            && matches!(self.stage_registers.ifid, IfId::Flush)
             && matches!(self.stage_registers.idex, IdEx::Flush)
             && matches!(self.stage_registers.exmem, ExMem::Flush)
-            && matches!(self.stage_registers.memwb, MEMWB::Flush)
+            && matches!(self.stage_registers.memwb, MemWb::Flush)
     }
 
     /// Main loop of the CPU simulator
+    ///
+    /// This function will run the CPU until the program is over
+    ///
+    /// It will print the report of each clock cycle
     pub fn run(&mut self) {
         loop {
             println!();
@@ -220,6 +262,10 @@ impl CPU {
     }
 
     /// Body of the main loop of the CPU simulator, separated for testing purposes
+    ///
+    /// This function will run the CPU for one clock cycle
+    ///
+    /// Pipeline stages are executed in reverse order to simplify the implementation
     ///
     /// # Returns
     ///
@@ -252,6 +298,10 @@ impl CPU {
     }
 
     /// the Fetch stage of the CPU.
+    ///
+    /// # Returns
+    ///
+    /// a report of what happened in the CPU during the fetch stage
     fn fetch(&mut self) -> String {
         // check if the decode stage indicates a stall
         if self.stage_registers.idex == IdEx::Stall {
@@ -269,25 +319,24 @@ impl CPU {
         self.pc = self.pc_src.next(self.pc);
         // get the current instruction from the ROM
         let Some(instruction_code) = self.i_mem.get_instruction(self.pc) else {
+            // flush IFID and set pc to PCSrc::END if the program is over
             self.pc_src = PCSrc::End;
-            self.stage_registers.ifid = IFID::Flush;
+            self.stage_registers.ifid = IfId::Flush;
             return String::new();
         };
         // set the IF/ID stage registers
-        self.stage_registers.ifid = IFID::If {
+        self.stage_registers.ifid = IfId::If {
             instruction_code,
             pc: self.pc,
         };
 
         // report if the pc was modified
-        let report = match self.pc_src {
+        let report: String = match self.pc_src {
             PCSrc::Init => String::new(),
             PCSrc::End => {
                 return String::new();
             }
-            _ => {
-                format!("pc is modified to 0x{:x}\n", self.pc)
-            }
+            _ => format!("pc is modified to 0x{:x}\n", self.pc),
         };
         // if the pc_src was init, branch, or jump, we need to reset it to next
         if matches!(
@@ -301,14 +350,20 @@ impl CPU {
     }
 
     /// the Decode stage of the CPU.
+    ///
+    /// This function will decode the instruction in the IF/ID stage and set the ID/EX stage registers.
+    ///
+    /// # Errors
+    ///
+    /// * if the instruction in the IF/ID stage is invalid
     fn decode(&mut self) -> Result<()> {
-        // if the fetch stage failed, flush
+        // if the fetch stage failed, flush and exit early
         let (instruction_code, pc) = match self.stage_registers.ifid {
-            IFID::Flush => {
+            IfId::Flush => {
                 self.stage_registers.idex = IdEx::Flush;
                 return Ok(());
             }
-            IFID::If {
+            IfId::If {
                 instruction_code,
                 pc,
             } => (instruction_code, pc),
@@ -317,11 +372,10 @@ impl CPU {
         // decode the instruction
         let instruction = Instruction::from_machine_code(instruction_code)?;
 
-        // check for a load hazard
-        let stall_required = HazardDetectionUnit::prime(instruction, self.stage_registers.idex)
-            .detect_stall_conditions();
-
-        if stall_required {
+        // check for a load-use hazard
+        if HazardDetectionUnit::prime(instruction, self.stage_registers.idex)
+            .detect_stall_conditions()
+        {
             self.stage_registers.idex = IdEx::Stall;
             return Ok(());
         }
@@ -344,7 +398,7 @@ impl CPU {
         };
 
         // sign extend the immediate value
-        let immediate = match instruction {
+        let immediate: Immediate = match instruction {
             Instruction::IType { imm, .. } | Instruction::SType { imm, .. } => {
                 Immediate::SignedImmediate(i32::from(imm) << (32 - 12) >> (32 - 12))
             }
@@ -363,8 +417,9 @@ impl CPU {
         };
 
         // set the control signals
-        let control_signals = control_unit(instruction.opcode().unwrap())?;
+        let control_signals = control_unit(instruction.opcode())?;
 
+        // set the ID/EX stage registers
         self.stage_registers.idex = IdEx::Id {
             instruction,
             rs1,
@@ -381,9 +436,15 @@ impl CPU {
 
     /// the Execute stage of the CPU.
     ///
-    /// TODO: branch and jump address handling
+    /// This function will execute the instruction in the ID/EX stage and set the EX/MEM stage registers.
+    ///
+    /// # Errors
+    ///
+    /// * if the ALU control unit fails
+    /// * if the branch and jump unit fails
+    /// * if an invalid immediate value is found
     fn execute(&mut self) -> Result<()> {
-        // if the decode stage failed, flush
+        // if the decode stage failed, flush and exit early
         let (instruction, read_data_1, read_data_2, immediate, pc, control_signals) =
             match self.stage_registers.idex {
                 IdEx::Flush | IdEx::Stall => {
@@ -479,6 +540,7 @@ impl CPU {
             immediate,
         )?;
 
+        // set the EX/MEM stage registers
         self.stage_registers.exmem = ExMem::Ex {
             instruction,
             alu_result,
@@ -492,27 +554,33 @@ impl CPU {
     }
 
     /// the Memory stage of the CPU.
+    ///
+    /// This function will read or write to the data memory based on the control signals.
+    ///
+    /// # Returns
+    ///
+    /// a report of what happened in the CPU during the memory stage
     fn mem(&mut self) -> String {
         // if the execute stage failed, flush
         let (instruction, alu_result, read_data_2, pc, control_signals) =
             match self.stage_registers.exmem {
                 ExMem::Flush => {
-                    self.stage_registers.memwb = MEMWB::Flush;
+                    self.stage_registers.memwb = MemWb::Flush;
                     return String::new();
                 }
                 ExMem::Ex {
                     instruction,
                     alu_result,
-                    alu_zero: _,
                     read_data_2,
                     pc_src,
                     pc,
                     control_signals,
+                    ..
                 } => {
                     // if the branch and jump unit told us to take a branch or jump, we need to flush the pipeline
                     match pc_src {
                         PCSrc::BranchTarget { .. } | PCSrc::JumpTarget { .. } => {
-                            self.stage_registers.ifid = IFID::Flush;
+                            self.stage_registers.ifid = IfId::Flush;
                             self.stage_registers.idex = IdEx::Flush;
                             self.if_flush = true;
                         }
@@ -528,7 +596,7 @@ impl CPU {
                 // load
                 let mem_read_data = self.d_mem.read(alu_result);
                 (
-                    MEMWB::Mem {
+                    MemWb::Mem {
                         instruction,
                         alu_result,
                         mem_read_data: Some(mem_read_data),
@@ -543,7 +611,7 @@ impl CPU {
                 self.d_mem
                     .write(alu_result, read_data_2.expect("no data to store"));
                 (
-                    MEMWB::Mem {
+                    MemWb::Mem {
                         instruction,
                         alu_result,
                         mem_read_data: None,
@@ -560,7 +628,7 @@ impl CPU {
             (false, false) => {
                 // no memory operation
                 (
-                    MEMWB::Mem {
+                    MemWb::Mem {
                         instruction,
                         alu_result,
                         mem_read_data: None,
@@ -579,15 +647,21 @@ impl CPU {
     }
 
     /// the Write Back stage of the CPU.
+    ///
+    /// This function will write the result of the ALU operation or the memory read data to the register file.
+    ///
+    /// # Returns
+    ///
+    /// a report of what happened in the CPU during the write back stage
     fn write_back(&mut self) -> String {
         // if the memory stage failed, flush
         let (instruction, alu_result, mem_read_data, pc, control_signals) =
             match self.stage_registers.memwb {
-                MEMWB::Flush => {
+                MemWb::Flush => {
                     self.stage_registers.wb_stage = Wb::Flush;
                     return String::new();
                 }
-                MEMWB::Mem {
+                MemWb::Mem {
                     instruction,
                     alu_result,
                     mem_read_data,
@@ -627,8 +701,7 @@ impl CPU {
                         // write the memory read data to the register file
                         self.rf.write(rd, mem_read_data.expect("no data to write"));
                         format!(
-                            "{} is modified to 0x{:x}\n",
-                            rd,
+                            "{rd} is modified to 0x{:x}\n",
                             mem_read_data.expect("no data to write")
                         )
                     }
@@ -639,7 +712,7 @@ impl CPU {
                             control_signals,
                         };
                         self.rf.write(rd, pc + 4);
-                        format!("{} is modified to 0x{:x}\n", rd, pc + 4)
+                        format!("{rd} is modified to 0x{:x}\n", pc + 4)
                     }
                 }
             }
@@ -733,9 +806,6 @@ fn branching_jump_unit(
                         Immediate::BranchOffset(offset) => PCSrc::BranchTarget{offset},
                         _ => return Err(anyhow::anyhow!("invalid immediate value\n")),
                     }
-
-
-
                 ),
 
                 // don't take branch
@@ -864,7 +934,7 @@ mod tests {
         let _ = cpu.fetch();
 
         match cpu.stage_registers.ifid {
-            IFID::If {
+            IfId::If {
                 instruction_code,
                 pc,
             } => {
@@ -877,7 +947,7 @@ mod tests {
         let _ = cpu.fetch();
 
         match cpu.stage_registers.ifid {
-            IFID::If {
+            IfId::If {
                 instruction_code,
                 pc,
             } => {
@@ -890,7 +960,7 @@ mod tests {
         let _ = cpu.fetch();
 
         match cpu.stage_registers.ifid {
-            IFID::If {
+            IfId::If {
                 instruction_code,
                 pc,
             } => {
@@ -903,7 +973,7 @@ mod tests {
         let _ = cpu.fetch();
 
         match cpu.stage_registers.ifid {
-            IFID::If {
+            IfId::If {
                 instruction_code,
                 pc,
             } => {
@@ -1005,7 +1075,7 @@ mod tests {
         let _ = cpu.mem();
 
         match cpu.stage_registers.memwb {
-            MEMWB::Mem {
+            MemWb::Mem {
                 instruction,
                 alu_result,
                 mem_read_data,

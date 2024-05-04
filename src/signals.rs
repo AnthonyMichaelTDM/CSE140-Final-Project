@@ -94,7 +94,15 @@ pub enum PCSrc {
 }
 
 impl PCSrc {
-    /// returns the next PC value.
+    /// Calculate the next PC value based on the current PC value.
+    ///
+    /// # Arguments
+    ///
+    /// * `pc` - the current program counter value
+    ///
+    /// # Returns
+    ///
+    /// * `u32` - the next program counter value
     #[must_use]
     pub const fn next(&self, pc: u32) -> u32 {
         match self {

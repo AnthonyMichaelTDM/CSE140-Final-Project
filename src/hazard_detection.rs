@@ -22,7 +22,18 @@ pub enum ForwardB {
     MemWb = 0b01,
 }
 
-/// the forwarding unit determines whether to forward data from the EX/MEM and/or MEM/WB stages to the ID/EX stage.
+/// The forwarding unit determines whether to forward data from the EX/MEM and/or MEM/WB stages to the ID/EX stage.
+///
+/// # Arguments
+///
+/// * `exmem` - the values in the EX/MEM pipeline stage register.
+/// * `wb` - the values in the MEM/WB pipeline stage register.
+/// * `idex` - the values in the ID/EX pipeline stage register.
+///
+/// # Returns
+///
+/// * `ForwardA` - the forwarding decision for source register 1.
+/// * `ForwardB` - the forwarding decision for source register 2.
 pub fn forwarding_unit(exmem: ExMem, wb: Wb, idex: IdEx) -> (ForwardA, ForwardB) {
     // Initialize forwarding variables
     let mut forward_a = ForwardA::None;
@@ -78,20 +89,17 @@ pub fn forwarding_unit(exmem: ExMem, wb: Wb, idex: IdEx) -> (ForwardA, ForwardB)
     (forward_a, forward_b)
 }
 
-/// The hazard detection unit determines whether there is a data hazard between the ID and EX stages that requires stalling (e.g. load data hazards)
+/// The hazard detection unit determines whether there is a data hazard between the ID and EX stages that requires stalling (e.g. load-use hazards)
 /// (the forwarding unit handles rtype data hazards, and can handle load hazards if a stall was performed)
-///
-/// # Fields
-///
-/// * `ifid_rs1` - the source register 1 from the IF/ID stage
-/// * `ifid_rs2` - the source register 2 from the IF/ID stage
-/// * `idex_rd` - the destination register from the ID/EX stage
-/// * `idex_memread` - a boolean indicating whether the instruction in the ID/EX stage writes to memory
 #[allow(clippy::module_name_repetitions)]
 pub struct HazardDetectionUnit {
+    /// the source register 1 from the IF/ID stage
     ifid_rs1: Option<RegisterMapping>,
+    /// the source register 2 from the IF/ID stage
     ifid_rs2: Option<RegisterMapping>,
+    /// the destination register from the ID/EX stage
     idex_rd: Option<RegisterMapping>,
+    /// a boolean indicating whether the instruction in the ID/EX stage writes to memory
     idex_memread: bool,
 }
 

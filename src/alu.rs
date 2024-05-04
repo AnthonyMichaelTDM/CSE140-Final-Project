@@ -80,7 +80,7 @@ pub fn alu_control_unit(
             0b000 | 0b001 => ALUControl::SUB,  // beq or bne
             0b100 | 0b101 => ALUControl::SLT,  // blt or bge
             0b110 | 0b111 => ALUControl::SLTU, // bltu or bgeu
-            _ => unreachable!("every 3 bit integer is covered in the above"),
+            _ => bail!("Invalid funct3 for branch instruction"),
         },
         (ALUOp::FUNCT, Some(funct3), Some(funct7)) => match (funct7, funct3) {
             (0b000_0000, 0b000) => ALUControl::ADD,  // add
@@ -108,6 +108,21 @@ pub fn alu_control_unit(
     })
 }
 
+/// This function mimics the ALU in a risc-v processor, it takes in the ALU control signal, two 32-bit unsigned integers and returns a tuple of a boolean and a 32-bit unsigned integer.
+///
+/// # Arguments
+///
+/// * `alu_control` - the ALU control signal, determines the operation to perform.
+/// * `a` - the first operand.
+/// * `b` - the second operand.
+///
+/// # Returns
+///
+/// A tuple of a boolean and a 32-bit unsigned integer.
+///
+/// The boolean indicates whether the result of the operation is zero.
+///
+/// The 32-bit unsigned integer is the result of the operation.
 #[must_use]
 pub fn alu(alu_control: ALUControl, a: u32, b: u32) -> (bool, u32) {
     let result = match alu_control {
