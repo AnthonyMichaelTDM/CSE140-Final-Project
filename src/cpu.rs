@@ -136,15 +136,13 @@ pub struct CPU {
     /// the next program counter value.
     pc_src: PCSrc,
     /// signal that, when flipped, flushes the IF stage (prevents it from running for a cycle)
-    /// this is used to handle stalls in the pipeline
+    /// this is used to indicate stalls in the pipeline
     if_flush: bool,
-
     /// the total number of clock cycles that the CPU has executed.
     total_clock_cycles: u64,
     /// the stage registers of the CPU.
     /// These registers will be updated by the corresponding stage functions.
     stage_registers: StageRegisters,
-
     /// an integer array that has 32 entries.
     /// This register file array will be initialized to have all zeros unless otherwise specified.
     /// This register file will be updated by `write_back()` function.
@@ -155,18 +153,19 @@ pub struct CPU {
     /// We assume that the data memory address begins from `0x0`.
     /// Therefore, each entry of the `d_mem` array will be accessed with the following addresses.
     ///
-    /// | Memory address calculated at Execute() | Entry to access in `d_mem` array |
-    /// |----------------------------------------|----------------------------------|
-    /// |               `0x00000000`             |             `d_mem[0]`           |
-    /// |               `0x00000004`             |             `d_mem[1]`           |
-    /// |               `0x00000008`             |             `d_mem[2]`           |
-    /// |                    …                   |                  …               |
-    /// |               `0x0000007C`             |             `d_mem[31]`          |
+    /// | Memory address | Entry to access |
+    /// |                | in `d_mem` array|
+    /// |----------------|-----------------|
+    /// |  `0x00000000`  |`d_mem[0]`       |
+    /// |  `0x00000004`  |`d_mem[1]`       |
+    /// |  `0x00000008`  |`d_mem[2]`       |
+    /// |       …        |     …           |
+    /// |  `0x0000007C`  |`d_mem[31]`      |
     d_mem: DataMemory,
     /// an array that holds the instructions of the program.
     /// Each instruction is a 32-bit integer.
     /// The program counter (PC) will be used to index this array to get the current instruction.
-    /// The PC will be updated by the Fetch() function to get the next instruction in the next cycle.
+    /// The PC will be updated by the `fetch()` function to get the next instruction in the next cycle.
     i_mem: InstructionMemory,
 }
 

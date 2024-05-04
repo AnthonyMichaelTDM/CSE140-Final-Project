@@ -65,7 +65,7 @@ pub enum ExMem {
     Ex {
         instruction: Instruction,
         alu_result: u32,
-        /// This variable will be updated by Execute() function and used when deciding to use branch target address in the next cycle.
+        /// This variable will be updated by `execute()` function and used when deciding to use branch target address in the next cycle.
         /// The zero variable will be set to 1 by ALU when the computation result is zero and unset to 0 if otherwise.
         alu_zero: bool,
         read_data_2: Option<u32>,

@@ -9,19 +9,19 @@ use ux::u7;
 pub struct ControlSignals {
     /// tells the register file to write to the register specified by the instruction.
     pub reg_write: bool,
-    /// The BranchJump signal is a 2 bit signal that tells the Branching and Jump Unit what type of branching to consider.
+    /// The `BranchJump` signal is a 2 bit signal that tells the Branching and Jump Unit what type of branching to consider.
     pub branch_jump: BranchJump,
-    /// The ALUSrcA signal is a 1 bit signal that tells the ALU whether to use the register value (0), the PC (1), or the constant 0 as the second operand.
+    /// The `ALUSrcA` signal is a 1 bit signal that tells the ALU whether to use the register value (0), the PC (1), or the constant 0 as the second operand.
     pub alu_src_a: ALUSrcA,
-    /// The ALUSrcB signal is a 1 bit signal that tells the ALU whether to use the register value (0), the immediate value (1), or the constant 4 as the second operand.
+    /// The `ALUSrcB` signal is a 1 bit signal that tells the ALU whether to use the register value (0), the immediate value (1), or the constant 4 as the second operand.
     pub alu_src_b: ALUSrcB,
     /// The ALU operation signal is a 2 bit signal that tells the ALU Control Unit what type of instruction is being executed.
     pub alu_op: ALUOp,
-    /// The mem_write signal is a 1 bit signal that tells the data memory unit whether to write to memory.
+    /// The `mem_write` signal is a 1 bit signal that tells the data memory unit whether to write to memory.
     pub mem_write: bool,
     /// controls what source the write back stages uses.
     pub wb_src: WriteBackSrc,
-    /// The mem_read signal is a 1 bit signal that tells the data memory unit whether to read from memory.
+    /// The `mem_read` signal is a 1 bit signal that tells the data memory unit whether to read from memory.
     pub mem_read: bool,
 }
 
