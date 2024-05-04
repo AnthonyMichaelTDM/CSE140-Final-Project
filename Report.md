@@ -6,6 +6,63 @@
 
 ---
 
+## Table of Contents
+
+- [[#CSE 140 Final Project Report]]
+  - [[#Table of Contents]]
+  - [[#Code Structure and Implementation]]
+    - [[#Dependencies]]
+    - [[#High-Level Overview]]
+    - [[#Detailed Overview]]
+      - [[#CPU module]]
+        - [[#`InstructionMemory` struct]]
+        - [[#`DataMemory` struct]]
+        - [[#`branching_jump_unit` function]]
+        - [[#`CPU` struct]]
+          - [[#`fetch` method]]
+          - [[#`decode` method]]
+          - [[#`execute` method]]
+          - [[#`mem` method]]
+          - [[#`write_back` method]]
+      - [[#ALU module]]
+        - [[#`alu` function]]
+        - [[#`alu_control_unit` function]]
+      - [[#Registers module]]
+        - [[#`RegisterFile` struct]]
+        - [[#`RegisterMapping` enum]]
+        - [[#`Index` and `IndexMut` trait implementations]]
+      - [[#Instruction module]]
+        - [[#`Instruction` Enum]]
+      - [[#Signals module]]
+        - [[#Control Unit implementation]]
+          - [[#Jump Instructions]]
+        - [[#Control Signal Definitions]]
+        - [[#`PCSrc` Enum]]
+      - [[#Stages module]]
+        - [[#`StageRegisters` struct]]
+        - [[#`Immediate` enum]]
+        - [[#IfId, IdEx, ExMem, MemWb, and Wb Enums]]
+      - [[#Hazard Detection module]]
+        - [[#The `ForwardA` and `ForwardB` Enums]]
+        - [[#`forwarding_unit` function]]
+        - [[#the `HazardDetectionUnit` struct]]
+      - [[#Utils module]]
+  - [[#Execution of Sample Programs, and other testing]]
+    - [[#Testing]]
+      - [[#Unit Testing]]
+        - [[#ALU module tests]]
+        - [[#CPU module tests]]
+        - [[#Instruction module tests]]
+      - [[#Integration Testing]]￼￼￼Sample Program 2: Pipeline Table￼
+    - [[#Sample Program 1]]
+      - [[#Sample Program 1: Execution]]
+      - [[#Sample Program 1: Pipeline Table]]
+    - [[#Sample Program 2]]
+      - [[#Sample Program 2: Execution]]
+      - [[#Sample Program 2: Pipeline Table]]
+
+---
+
 ## Code Structure and Implementation
 
 The project is implemented in the [Rust programming language](https://www.rust-lang.org/), I won't go into detail about the language itself, but for a quick primer on the syntax I'd recommend [this article](https://stevedonovan.github.io/rust-gentle-intro/1-basics.html), the [official book](https://doc.rust-lang.org/book/), [Rust by Example](https://doc.rust-lang.org/rust-by-example/), or this [cheatsheet](https://cheats.rs/).
@@ -58,8 +115,10 @@ The `InstructionMemory` struct is a simple wrapper around a vector of 32-bit int
 ```rust
 /// an array that holds the instructions of the program.
 /// Each instruction is a 32-bit integer.
-/// The program counter (PC) will be used to index this array to get the current instruction.
-/// The PC will be updated by the `Fetch()` function to get the next instruction in the next cycle.
+/// The program counter (PC) will be used to index this array to get 
+/// the current instruction.
+/// The PC will be updated by the `Fetch()` function to get the next
+/// instruction in the next cycle.
 pub struct InstructionMemory {
     instructions: Vec<u32>,
 }
@@ -72,11 +131,9 @@ impl InstructionMemory {
     /// create a new `InstructionMemory` instance.
     ///
     /// # Arguments
-    ///
     /// * `rom` - the program instructions
     ///
     /// # Returns
-    ///
     /// a new `InstructionMemory` instance
     #[must_use]
     pub fn new(rom: Vec<u32>) -> Self {
@@ -86,16 +143,14 @@ impl InstructionMemory {
     /// get the instruction at the given program counter value.
     ///
     /// # Panics
-    ///
     /// * if the program counter value is not aligned to 4 bytes
     ///
     /// # Arguments
-    ///
     /// * `pc` - the program counter value
     ///
     /// # Returns
-    ///
-    /// * `Some(u32)` - the instruction at the given program counter value
+    /// * `Some(u32)` - the instruction at the given program 
+    ///   counter value
     #[must_use]
     pub fn get_instruction(&self, pc: u32) -> Option<u32> {
         if pc as usize / 4 >= self.rom.len() {
@@ -129,7 +184,6 @@ impl DataMemory {
     /// create a new `DataMemory` instance.
     ///
     /// # Returns
-    ///
     /// a new `DataMemory` instance, initialized with all zeros
     #[must_use]
     pub const fn new() -> Self {
@@ -139,15 +193,12 @@ impl DataMemory {
     /// read a 32-bit value from the data memory
     ///
     /// # Panics
-    ///
     /// * if the address is out of bounds or not aligned to 4 bytes
     ///
     /// # Arguments
-    ///
     /// * `address` - the address to read from
     ///
     /// # Returns
-    ///
     /// the 32-bit value at the address
     #[must_use]
     pub fn read(&self, address: u32) -> u32 {
@@ -164,11 +215,9 @@ impl DataMemory {
     /// write a 32-bit value to the data memory
     ///
     /// # Panics
-    ///
     /// * if the address is out of bounds or not aligned to 4 bytes
     ///
     /// # Arguments
-    ///
     /// * `address` - the address to write to
     /// * `value` - the value to write
     pub fn write(&mut self, address: u32, value: u32) {
@@ -189,21 +238,27 @@ impl DataMemory {
 The `branching_jump_unit` function is responsible for determining the next value of the program counter based on the current instruction and the control signals.
 
 ```rust
-/// The Branch and Jump Unit is responsible for determining whether a branch or jump should be taken.
+/// The Branch and Jump Unit is responsible for determining whether a
+/// branch or jump should be taken.
 ///
 /// # Arguments
-///
-/// * `branch_jump` - a 2 bit control signal that tells the Branching and Jump Unit what type of branching to consider.
-/// * `alu_zero` - a signal that tells the Branching and Jump Unit whether the ALU result is zero.
+/// * `branch_jump` - a 2 bit control signal that tells the Branching
+///    and Jump Unit what type of branching to consider.
+/// * `alu_zero` - a signal that tells the Branching and Jump Unit
+///    whether the ALU result is zero.
 /// * `alu_control` - the operation that the ALU performed.
-/// * `operands_equal` - a signal that tells the Branching and Jump Unit whether the operands to the alu were are equal.
-/// * `funct3` - the funct3 field of the instruction (only for branch instructions)
+/// * `operands_equal` - a signal that tells the Branching and Jump Unit
+///    whether the operands to the alu were are equal.
+/// * `funct3` - the funct3 field of the instruction 
+///    (only for branch instructions)
 ///
 /// # Returns
-///
 /// * `Ok(None)` - if no branch or jump should be taken
-/// * `Ok(Some((u32, PCSrc)))` - the target address and the source of the next PC value (which also determines where the returned target address should be stored)
-/// * `Err(anyhow::Error)` - if the arguments are invalid or the operation is not supported
+/// * `Ok(Some((u32, PCSrc)))` - the target address and the source of 
+///    the next PC value (which also determines where the returned
+///    target address should be stored)
+/// * `Err(anyhow::Error)` - if the arguments are invalid or the
+///    operation is not supported
 fn branching_jump_unit(
     branch_jump: BranchJump,
     alu_control: ALUControl,
@@ -232,38 +287,45 @@ pub struct CPU {
     pc: u32,
     /// the next program counter value.
     pc_src: PCSrc,
-    /// signal that, when flipped, flushes the IF stage (prevents it from running for a cycle)
-    /// this is used to handle stalls in the pipeline
+    /// signal that, when flipped, flushes the IF stage 
+    /// (prevents it from running for a cycle).
+    /// this is used to indicate stalls in the pipeline
     if_flush: bool,
-
     /// the total number of clock cycles that the CPU has executed.
     total_clock_cycles: u64,
     /// the stage registers of the CPU.
-    /// These registers will be updated by the corresponding stage functions.
+    /// These registers will be updated by the corresponding 
+    /// stage functions.
     stage_registers: StageRegisters,
-
     /// an integer array that has 32 entries.
-    /// This register file array will be initialized to have all zeros unless otherwise specified.
+    /// This register file array will be initialized to have all zeros
+    /// unless otherwise specified.
     /// This register file will be updated by `write_back()` function.
-    /// This register file can be indexed by with `RegisterMapping` enum variants for ergonomics.
+    /// This register file can be indexed by with `RegisterMapping` enum
+    ///  variants for ergonomics.
     rf: RegisterFile,
     /// an integer array that has 32 entries.
-    /// Each entry of this array will be considered as one 4-byte memory space.
+    /// Each entry of this array will be considered as 
+    /// one 4-byte memory space.
     /// We assume that the data memory address begins from `0x0`.
-    /// Therefore, each entry of the `d_mem` array will be accessed with the following addresses.
+    /// Therefore, each entry of the `d_mem` array will be accessed with
+    /// the following addresses.
     ///
-    /// | Memory address calculated at Execute() | Entry to access in `d_mem` array |
-    /// |----------------------------------------|----------------------------------|
-    /// |               `0x00000000`             |             `d_mem[0]`           |
-    /// |               `0x00000004`             |             `d_mem[1]`           |
-    /// |               `0x00000008`             |             `d_mem[2]`           |
-    /// |                    …                   |                  …               |
-    /// |               `0x0000007C`             |             `d_mem[31]`          |
+    /// | Memory address | Entry to access |
+    /// |                | in `d_mem` array|
+    /// |----------------|-----------------|
+    /// |  `0x00000000`  |`d_mem[0]`       |
+    /// |  `0x00000004`  |`d_mem[1]`       |
+    /// |  `0x00000008`  |`d_mem[2]`       |
+    /// |       …        |     …           |
+    /// |  `0x0000007C`  |`d_mem[31]`      |
     d_mem: DataMemory,
     /// an array that holds the instructions of the program.
     /// Each instruction is a 32-bit integer.
-    /// The program counter (PC) will be used to index this array to get the current instruction.
-    /// The PC will be updated by the Fetch() function to get the next instruction in the next cycle.
+    /// The program counter (PC) will be used to index this array to get
+    /// the current instruction.
+    /// The PC will be updated by the `fetch()` function to get the next
+    /// instruction in the next cycle.
     i_mem: InstructionMemory,
 }
 ```
@@ -275,11 +337,9 @@ impl CPU {
     /// Initialize the CPU state
     ///
     /// # Arguments
-    ///
     /// * `rom` - the program instructions
     ///
     /// # Returns
-    ///
     /// a new `CPU` instance
     #[must_use]
     pub fn new(rom: Vec<u32>) -> Self {
@@ -295,18 +355,20 @@ impl CPU {
         }
     }
 
-    /// Initialize the register file with the given mappings
-    ///
-    /// exposes the `initialize` method of the `RegisterFile` struct
-    pub fn initialize_rf(&mut self, mappings: &[(RegisterMapping, u32)]) {
+    /// Initialize the register file with the given mappings.
+    /// Exposes the `initialize` method of the `RegisterFile` struct.
+    pub fn initialize_rf(
+        &mut self, mappings: &[(RegisterMapping, u32)]
+    ) {
         self.rf.initialize(mappings);
     }
 
     /// Initialize the data memory with the given data
     ///
     /// # Arguments
-    ///
-    /// * `data` - a list of tuples where the first element is the address to write to and the second element is the value to write
+    /// * `data` - a list of tuples where the first element is the
+    ///   address to write to and the second element is the value 
+    ///   to write
     pub fn initialize_dmem(&mut self, data: &[(u32, u32)]) {
         for (address, value) in data {
             self.d_mem.write(*address, *value);
@@ -314,7 +376,6 @@ impl CPU {
     }
 
     /// # Returns
-    ///
     /// the total number of clock cycles that the CPU has executed
     #[must_use]
     pub const fn get_total_clock_cycles(&self) -> u64 {
@@ -324,13 +385,12 @@ impl CPU {
     /// is the program over
     ///
     /// # Returns
-    ///
     /// `true` if the program is over, `false` otherwise
     #[must_use]
     pub fn is_done(&self) -> bool {
         ... // implementation omitted
-        // true if the program counter is at the end of the instruction memory
-        // and all stages are flushed
+        // true if the program counter is at the end of the 
+        // instruction memory, and all stages are flushed
     }
 
     /// Main loop of the CPU simulator
@@ -357,28 +417,35 @@ impl CPU {
         }
 
         println!("program terminated:");
-        println!("total execution time is {} cycles", self.total_clock_cycles);
+        println!(
+            "total execution time is {} cycles",
+            self.total_clock_cycles
+        );
     }
 
-    /// Body of the main loop of the CPU simulator, separated for testing purposes
+    /// Body of the main loop of the CPU simulator, separated for
+    /// testing purposes.
     /// 
     /// This function will run the CPU for one clock cycle
     /// 
-    /// Pipeline stages are executed in reverse order to simplify the implementation
+    /// Pipeline stages are executed in reverse order to simplify 
+    /// the implementation
     ///
     /// # Returns
-    ///
-    /// * `Ok(Report)` - a report of what happened in the CPU during a clock cycle
+    /// * `Ok(Report)` - a report of what happened in the CPU 
+    ///   during a clock cycle
     ///
     /// # Errors
-    ///
     /// * if there is an error in the CPU pipeline
     pub fn run_step(&mut self) -> Result<Report> {
         let mut report = String::new();
 
         self.total_clock_cycles += 1;
 
-        report.push_str(format!("total_clock_cycles {} :\n", self.total_clock_cycles).as_str());
+        report.push_str(format!(
+          "total_clock_cycles {} :\n",
+            self.total_clock_cycles
+        ).as_str());
 
         let wb_report = self.write_back();
         let mem_report = self.mem();
@@ -386,70 +453,20 @@ impl CPU {
         self.decode()?;
         let if_report = self.fetch();
 
-        // mem will tell us if data memory was updated, so we add that to the report
+        // mem will tell us if data memory was updated, 
+        // so we add that to the report
         report.push_str(&mem_report);
-        // wb will tell us if registers were updated, so we add those to the report
+        // wb will tell us if registers were updated, 
+        // so we add those to the report
         report.push_str(&wb_report);
-        // if will tell us if the pc was updated, so we add that to the report
+        // if will tell us if the pc was updated, 
+        // so we add that to the report
         report.push_str(&if_report);
 
         Ok(report)
     }
 
-    /// the Fetch stage of the CPU.
-    ///
-    /// # Returns
-    ///
-    /// a report of what happened in the CPU during the fetch stage
-    fn fetch(&mut self) -> String {
-        ... // implementation omitted
-    }
-
-    /// the Decode stage of the CPU.
-    ///
-    /// This function will decode the instruction in the IF/ID stage and set the ID/EX stage registers.
-    ///
-    /// # Errors
-    ///
-    /// * if the instruction in the IF/ID stage is invalid
-    fn decode(&mut self) -> Result<()> {
-        ... // implementation omitted
-    }
-
-    /// the Execute stage of the CPU.
-    ///
-    /// This function will execute the instruction in the ID/EX stage and set the EX/MEM stage registers.
-    ///
-    /// # Errors
-    ///
-    /// * if the ALU control unit fails
-    /// * if the branch and jump unit fails
-    /// * if an invalid immediate value is found
-    fn execute(&mut self) -> Result<()> {
-        ... // implementation omitted
-    }
-
-    /// the Memory stage of the CPU.
-    ///
-    /// This function will read or write to the data memory based on the control signals.
-    ///
-    /// # Returns
-    ///
-    /// a report of what happened in the CPU during the memory stage
-    fn mem(&mut self) -> String {
-        ... // implementation omitted
-    }
-
-    /// the Write Back stage of the CPU.
-    ///
-    /// This function will write the result of the ALU operation or the memory read data to the register file.
-    ///
-    /// # Returns
-    ///
-    /// a report of what happened in the CPU during the write back stage
-    fn write_back(&mut self) -> String {
-        ... // implementation omitted
-    }
+    ... // stage functions, see below
 }
 ```
 
@@ -463,7 +480,6 @@ Again, a lot of the implementation is omitted for brevity, but the comments give
 /// the Fetch stage of the CPU.
 /// 
 /// # Returns
-/// 
 /// a report of what happened in the CPU during the fetch stage
 fn fetch(&mut self) -> String {
     // check if the decode stage indicates a stall
@@ -472,7 +488,8 @@ fn fetch(&mut self) -> String {
         return String::from("pipeline stalled in the decode stage\n");
     }
 
-    // if the execute stage told us to flush the IF stage, we don't need to do anything
+    // if the execute stage told us to flush the IF stage, 
+    // we don't need to do anything
     if self.if_flush {
         self.if_flush = false;
         return String::from("pipeline flushed\n");
@@ -481,12 +498,13 @@ fn fetch(&mut self) -> String {
     // increment the program counter
     self.pc = self.pc_src.next(self.pc);
     // get the current instruction from the ROM, 
-    let Some(instruction_code) = self.i_mem.get_instruction(self.pc) else {
-        // flush IfId and set pc to PCSrc::END if the program is over
-        self.pc_src = PCSrc::End;
-        self.stage_registers.ifid = IfId::Flush;
-        return String::new();
-    };
+    let Some(instruction_code) = self.i_mem.get_instruction(self.pc)
+        else {
+            // flush IfId and set pc to PCSrc::END if the program is over
+            self.pc_src = PCSrc::End;
+            self.stage_registers.ifid = IfId::Flush;
+            return String::new();
+        };
 
     // set the IF/ID stage registers
     self.stage_registers.ifid = IFID::If {
@@ -497,7 +515,8 @@ fn fetch(&mut self) -> String {
     /// report if the pc was modified
     let report: String = /* ommitted */ ;
 
-    // if the pc_src was init, branch, or jump, we need to reset it to next
+    // if the pc_src was init, branch, or jump, 
+    // we need to reset it to next
     if /* ommitted */ {
         self.pc_src = PCSrc::Next;
     }
@@ -518,10 +537,10 @@ The `decode` method also handles load-use hazards (see the `HazardDetectionUnit`
 ```rust
 /// the Decode stage of the CPU.
 /// 
-/// This function will decode the instruction in the IF/ID stage and set the ID/EX stage registers.
+/// This function will decode the instruction in the IF/ID stage and set
+/// the ID/EX stage registers.
 /// 
 /// # Errors
-/// 
 /// * if the instruction in the IF/ID stage is invalid
 fn decode(&mut self) -> Result<()> {
     // if the fetch stage failed, flush and exit early
@@ -581,19 +600,25 @@ The `execute` method also handles control hazards (see the `branching_jump_unit`
 ```rust
 /// the Execute stage of the CPU.
 ///
-/// This function will execute the instruction in the ID/EX stage and set the EX/MEM stage registers.
+/// This function will execute the instruction in the ID/EX stage and
+/// set the EX/MEM stage registers.
 ///
 /// # Errors
-///
 /// * if the ALU control unit fails
 /// * if the branch and jump unit fails
 /// * if an invalid immediate value is found
 fn execute(&mut self) -> Result<()> {
     // if the decode stage failed, flush and exit early
-    let (instruction, read_data_1, read_data_2, immediate, pc, control_signals) =
-        match self.stage_registers.idex {
-            /* ommitted */
-        };
+    let (
+        instruction, 
+        read_data_1, 
+        read_data_2, 
+        immediate, 
+        pc, 
+        control_signals
+    ) = match self.stage_registers.idex {
+        /* ommitted */
+    };
 
     // ALU control unit
     let alu_control = alu_control_unit(
@@ -615,7 +640,9 @@ fn execute(&mut self) -> Result<()> {
         self.stage_registers.exmem,
         self.stage_registers.wb_stage,
     ) {
-        (ForwardA::ExMem, ExMem::Ex { alu_result, .. }, _) => Some(alu_result),
+        (ForwardA::ExMem, ExMem::Ex { alu_result, .. }, _) => {
+            Some(alu_result)
+        }
         (ForwardA::MemWb, _, Wb::Mem { wb_data, .. }) => wb_data,
         _ => read_data_1,
     };
@@ -630,16 +657,20 @@ fn execute(&mut self) -> Result<()> {
     let alu_operand_b: u32 = match control_signals.alu_src_b {
         ALUSrcB::Register => read_data_2.unwrap(),
         ALUSrcB::Immediate => match immediate {
-            Immediate::SignedImmediate(imm) | Immediate::JumpOffset(imm) => imm as u32,
+            Immediate::SignedImmediate(imm) 
+            | Immediate::JumpOffset(imm) => imm as u32,
             Immediate::UpperImmediate(imm) => imm,
             /* other cases omitted, but they throw errors */ 
         },
         ALUSrcB::Constant4 => 4,
     };
 
-    let (alu_zero, alu_result) = alu(alu_control, alu_operand_a, alu_operand_b);
+    let (alu_zero, alu_result) = alu(
+        alu_control, alu_operand_a, alu_operand_b
+    );
 
-    // signal used by the branch and jump unit to help it resolve the branch or jump instruction
+    // signal used by the branch and jump unit to help it resolve 
+    // the branch or jump instruction
     let operands_equal = alu_operand_a == alu_operand_b;
 
     // branch and jump address calculation
@@ -676,7 +707,8 @@ The `mem` method is responsible for reading or writing to the data memory based 
 ```rust
 /// the Memory stage of the CPU.
 ///
-/// This function will read or write to the data memory based on the control signals.
+/// This function will read or write to the data memory based on the
+/// control signals.
 ///
 /// # Returns
 ///
@@ -690,12 +722,15 @@ fn mem(&mut self) -> String {
                 return String::new();
             }
             ExMem::Ex { /* ommitted */ } => {
-                // if the branch and jump unit told us to take a branch or jump, we need to flush the pipeline
+                // if the branch and jump unit told us to take a 
+                // branch or jump, we need to flush the pipeline
                 /* implementation ommitted */
             }
         };
 
-    let (memwb, report) = match (control_signals.mem_read, control_signals.mem_write) {
+    let (memwb, report) = match (
+        control_signals.mem_read, control_signals.mem_write
+    ) {
         (true, false) => {
             // load
             /* ommitted */
@@ -708,7 +743,9 @@ fn mem(&mut self) -> String {
             // no memory operation
             /* ommitted */
         }
-        (true, true) => panic!("invalid control signals for memory stage"),
+        (true, true) => {
+          panic!("invalid control signals for memory stage")
+        }
     };
 
     self.stage_registers.memwb = memwb;
@@ -727,7 +764,8 @@ The `write_back` method is responsible for writing pc+4, the result of the ALU o
 ```rust
 /// the Write Back stage of the CPU.
 ///
-/// This function will write the result of the ALU operation or the memory read data to the register file.
+/// This function will write the result of the ALU operation or the
+/// memory read data to the register file.
 ///
 /// # Returns
 ///
@@ -740,7 +778,10 @@ fn write_back(&mut self) -> String {
                 self.stage_registers.wb_stage = Wb::Flush;
                 return String::new();
             }
-            /* other case ommitted, but essentially just unpacking the MemWb enum */
+            /* 
+            other case ommitted, but essentially just unpacking the
+            MemWb enum
+            */
         };
 
     match (control_signals.reg_write, instruction.rd()) {
@@ -775,7 +816,8 @@ fn write_back(&mut self) -> String {
         }
         (true, None) | (false, _) => {
             // no write to register file
-            String::new() /* Note: no `;` here, so this is the return value */
+            String::new() // Note: no `;` here, 
+                          // so this is the return value
         }
     }
 }
@@ -790,20 +832,19 @@ The ALU module contains the implementation of the ALU and the ALU Control Unit.
 The `alu` function is the implementation of the ALU, it's pretty self-explanatory.
 
 ```rust
-/// This function mimics the ALU in a risc-v processor, it takes in the ALU control signal, two 32-bit unsigned integers and returns a tuple of a boolean and a 32-bit unsigned integer.
+/// This function mimics the ALU in a risc-v processor, it takes in the
+/// ALU control signal, two 32-bit unsigned integers and returns a tuple
+/// of a boolean and a 32-bit unsigned integer.
 ///
 /// # Arguments
-///
-/// * `alu_control` - the ALU control signal, determines the operation to perform.
+/// * `alu_control` - the ALU control signal, 
+///    determines the operation to perform.
 /// * `a` - the first operand.
 /// * `b` - the second operand.
 ///
 /// # Returns
-///
 /// A tuple of a boolean and a 32-bit unsigned integer.
-///
 /// The boolean indicates whether the result of the operation is zero.
-///
 /// The 32-bit unsigned integer is the result of the operation.
 pub fn alu(alu_control: ALUControl, a: u32, b: u32) -> (bool, u32) {
     let result = match alu_control {
@@ -812,12 +853,10 @@ pub fn alu(alu_control: ALUControl, a: u32, b: u32) -> (bool, u32) {
         ALUControl::AND => a & b,
         ALUControl::OR => a | b,
         ALUControl::SLL => a << b,
-        #[allow(clippy::cast_possible_wrap)]
         ALUControl::SLT => u32::from((a as i32) < (b as i32)),
         ALUControl::SLTU => u32::from(a < b),
         ALUControl::XOR => a ^ b,
         ALUControl::SRL => a >> b,
-        #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
         ALUControl::SRA => (a as i32 >> b) as u32,
     };
 
@@ -832,9 +871,11 @@ The `alu_control_unit` function is the implementation of the ALU Control Unit, i
 ```rust
 /// This function mimics the ALU Control Unit in a risc-v processor.
 /// 
-/// The ALU operation signal is a 2 bit signal that tells the ALU Control Unit what type of instruction is being executed.
+/// The ALU operation signal is a 2 bit signal that tells the
+/// ALU Control Unit what type of instruction is being executed.
 ///
-/// The `funct3` and `funct7` fields are used in combination with `alu_op` to determine the exact operation to be performed by the ALU.
+/// The `funct3` and `funct7` fields are used in combination with
+/// `alu_op` to determine the exact operation to be performed by the ALU.
 ///
 /// This function is an implementation of the following Verilog module:
 ///
@@ -843,19 +884,19 @@ The `alu_control_unit` function is the implementation of the ALU Control Unit, i
 /// but it is extended to handle various branch instructions.
 ///
 /// # Arguments
-///
-/// * `alu_op` - a 2 bit signal that tells the ALU Control Unit what type of instruction is being executed.
-/// * `funct3` - a 3 bit signal that is used in combination with `alu_op` to determine the exact operation to be performed by the ALU.
-/// * `funct7` - a 7 bit signal that is used in combination with `alu_op` to determine the exact operation to be performed by the ALU.
+/// * `alu_op` - a 2 bit signal that tells the ALU Control Unit what 
+///   type of instruction is being executed.
+/// * `funct3` - a 3 bit signal that is used in combination with `alu_op`
+///    to determine the exact operation to be performed by the ALU.
+/// * `funct7` - a 7 bit signal that is used in combination with `alu_op`
+///    to determine the exact operation to be performed by the ALU.
 ///
 /// # Returns
-///
 /// The ALU control signal.
 ///
 /// # Errors
-///
-/// This function will return an error if the combination of `alu_op`, `funct3` and `funct7` doesn't match any of the valid combinations.
-#[allow(clippy::module_name_repetitions)]
+/// This function will return an error if the combination of `alu_op`,
+/// `funct3` and `funct7` doesn't match any of the valid combinations.
 pub fn alu_control_unit(
     alu_op: ALUOp,
     funct3: Option<u3>,
@@ -869,7 +910,8 @@ pub fn alu_control_unit(
             0b110 | 0b111 => ALUControl::SLTU, // bltu or bgeu
             _ => bail!("Invalid funct3 for branch instruction"),
         },
-        (ALUOp::FUNCT, Some(funct3), Some(funct7)) => match (funct7, funct3) {
+        (ALUOp::FUNCT, Some(funct3), Some(funct7)) => 
+        match (funct7, funct3) {
             (0b000_0000, 0b000) => ALUControl::ADD,  // add
             (0b010_0000, 0b000) => ALUControl::SUB,  // sub
             (0b000_0000, 0b111) => ALUControl::AND,  // and
@@ -925,14 +967,15 @@ impl RegisterFile {
         }
     }
 
-    /// Initialize the register file with the provided defaults, makes everything else 0
+    /// Initialize the register file with the provided defaults, 
+    /// makes everything else 0
     ///
     /// # Arguments
-    ///
-    /// * `mappings` - a list of tuples where the first element is the register to write to and the second element is the value to write
+    /// * `mappings` - a list of tuples where the first element is the
+    ///   register to write to and the second element is the value to
+    ///   write
     ///
     /// # Panics
-    ///
     /// Panics if the register to write to is `RegisterMapping::Zero`
     pub fn initialize(&mut self, mappings: &[(RegisterMapping, u32)]) {
         self.registers = [0; 32];
@@ -944,11 +987,9 @@ impl RegisterFile {
     /// Read the value of a register
     ///
     /// # Arguments
-    ///
     /// * `reg` - the register to read from
     ///
     /// # Returns
-    ///
     /// The value of the register
     #[must_use]
     pub const fn read(&self, reg: RegisterMapping) -> u32 {
@@ -958,7 +999,6 @@ impl RegisterFile {
     /// Write a value to a register
     ///
     /// # Arguments
-    ///
     /// * `reg` - the register to write to
     /// * `value` - the value to write
     pub fn write(&mut self, reg: RegisterMapping, value: u32) {
@@ -972,7 +1012,8 @@ impl RegisterFile {
 The `RegisterMapping` enum is a simple enum, internally backed by a `u8`, that pairs register names to their underlying index in the register file.
 
 ```rust
-/// This enum represents the mapping of the registers to their indices in the register file.
+/// This enum represents the mapping of the registers to their 
+/// indices in the register file.
 #[repr(u8)]
 pub enum RegisterMapping {
     Zero = 0,
@@ -1006,7 +1047,8 @@ The `Instruction` enum is a simple enum that represents the different types of i
 Each variant of the enum corresponds to a different type of instruction, and contains the necessary fields to represent that instruction as per the RISC-V ISA.
 
 ```rust
-/// An enum that represents the different types of instructions that can be executed by the CPU.
+/// An enum that represents the different types of instructions that 
+/// can be executed by the CPU.
 pub enum Instruction {
     RType {
         funct7: u7,
@@ -1035,7 +1077,7 @@ pub enum Instruction {
         opcode: u7,
     },
     SBType {
-        imm: i13, // 12 bits stored in machine code + last bit is always 0
+        imm: i13,// 12 bits stored in machine code + last bit is always 0
         rs2: RegisterMapping,
         rs1: RegisterMapping,
         funct3: u3,
@@ -1047,7 +1089,7 @@ pub enum Instruction {
         opcode: u7,
     },
     UJType {
-        imm: u21, // 20 bits stored in machine code + last bit is always 0
+        imm: u21,// 20 bits stored in machine code + last bit is always 0
         rd: RegisterMapping,
         opcode: u7,
     },
@@ -1059,19 +1101,19 @@ And it provides methods to get fields of the instruction, such as the opcode, fu
 
 ```rust
 impl Instruction {
-    /// Convert a 32-bit machine code instruction into an `Instruction` enum variant.
+    /// Convert a 32-bit machine code instruction into an `Instruction`
+    /// enum variant.
     ///
     /// # Arguments
-    ///
     /// * `machine_code` - the 32-bit machine code instruction
     ///
     /// # Returns
-    ///
-    /// * `Result<Instruction>` - The decoded `Instruction`, if the machine code is valid. Otherwise, an error is returned.
+    /// * `Result<Instruction>` - The decoded `Instruction`, 
+    ///    if the machine code is valid. Otherwise, an error is returned.
     ///
     /// # Errors
-    ///
-    /// This function will return an error if the machine code is invalid.
+    /// This function will return an error if the machine code
+    /// is invalid.
     pub fn from_machine_code(machine_code: u32) -> Result<Self> {
         /* basically the same as HW3, so omitted */
     }
@@ -1079,72 +1121,60 @@ impl Instruction {
     /// Get the opcode of the instruction.
     ///
     /// # Returns
-    ///
     /// * `u7` - the opcode of the instruction.
     #[must_use]
-    pub const fn opcode(&self) -> u7 {
-        /* omitted */
-    }
+    pub const fn opcode(&self) -> u7 {/* omitted */}
 
     /// Get the funct3 field of the instruction.
     ///
     /// # Returns
-    ///
-    /// * `Option<u3>` - the funct3 field of the instruction, if it has one.
+    /// * `Option<u3>` - the funct3 field of the instruction, 
+    ///   if it has one.
     #[must_use]
-    pub const fn funct3(&self) -> Option<u3> {
-        /* omitted */
-    }
+    pub const fn funct3(&self) -> Option<u3> {/* omitted */}
 
     /// Get the funct7 field of the instruction.
     ///
     /// # Returns
-    ///
-    /// * `Option<u7>` - the funct7 field of the instruction, if it has one.
+    /// * `Option<u7>` - the funct7 field of the instruction,
+    ///   if it has one.
     #[must_use]
-    pub const fn funct7(&self) -> Option<u7> {
-        /* omitted */
-    }
+    pub const fn funct7(&self) -> Option<u7> {/* omitted */}
 
     /// Get the shamt field of the instruction.
     ///
     /// # Returns
-    ///
-    /// * `Option<u5>` - the shamt field of the instruction, if it has one.
+    /// * `Option<u5>` - the shamt field of the instruction, 
+    ///   if it has one.
     #[must_use]
-    pub const fn shamt(&self) -> Option<u5> {
-        /* omitted */
-    }
+    pub const fn shamt(&self) -> Option<u5> {/* omitted */}
 
     /// Get the rd field of the instruction.
     ///
     /// # Returns
     ///
-    /// * `Option<RegisterMapping>` - the rd field of the instruction, if it has one.
+    /// * `Option<RegisterMapping>` - the rd field of the instruction,
+    ///   if it has one.
     #[must_use]
-    pub const fn rd(&self) -> Option<RegisterMapping> {
-        /* omitted */
-    }
+    pub const fn rd(&self) -> Option<RegisterMapping> {/* omitted */}
 
     /// Get the rs1 field of the instruction.
     ///
     /// # Returns
     ///
-    /// * `Option<RegisterMapping>` - the rs1 field of the instruction, if it has one.
+    /// * `Option<RegisterMapping>` - the rs1 field of the instruction,
+    ///   if it has one.
     #[must_use]
-    pub const fn rs1(&self) -> Option<RegisterMapping> {
-        /* omitted */
-    }
+    pub const fn rs1(&self) -> Option<RegisterMapping> {/* omitted */}
 
     /// Get the rs2 field of the instruction.
     ///
     /// # Returns
     ///
-    /// * `Option<RegisterMapping>` - the rs2 field of the instruction, if it has one.
+    /// * `Option<RegisterMapping>` - the rs2 field of the instruction,
+    ///   if it has one.
     #[must_use]
-    pub const fn rs2(&self) -> Option<RegisterMapping> {
-        /* omitted */
-    }
+    pub const fn rs2(&self) -> Option<RegisterMapping> {/* omitted */}
 }
 ```
 
@@ -1157,23 +1187,19 @@ The Signals module contains the definition of the control signals used by the CP
 The `control_unit` function is the implementation of the Control Unit, it determines the control signals for the instruction based on the opcode.
 
 ```rust
-
 /// Control Unit implementation
 ///
 /// # Arguments
-///
 /// * `opcode` - the opcode of the instruction
 ///
 /// # Returns
-///
-/// * `ControlSignals` - the control signals that the Control Unit generates
+/// * `ControlSignals` - the control signals that the Control Unit 
+///   generates
 ///
 /// # Errors
-///
 /// * if the opcode is not recognized / not supported
 ///
 /// # Description
-///
 /// the control unit considers 9 types of instructions:
 ///
 /// 1. `lui` instruction
@@ -1188,11 +1214,13 @@ The `control_unit` function is the implementation of the Control Unit, it determ
 pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
     match u8::from(opcode) {
         // lui
-        0b011_0111 => Err(anyhow::anyhow!("lui instruction not supported yet")),
-
+        0b011_0111 => Err(anyhow::anyhow!(
+            "lui instruction not supported yet"
+        )),
         // auipc
-        0b001_0111 => Err(anyhow::anyhow!("auipc instruction not supported yet")),
-
+        0b001_0111 => Err(anyhow::anyhow!(
+            "auipc instruction not supported yet"
+        )),
         // jal
         0b110_1111 => Ok(ControlSignals {
             reg_write: true,
@@ -1204,7 +1232,6 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
             wb_src: WriteBackSrc::PC,
             mem_read: false,
         }),
-
         // jalr
         0b110_0111 => Ok(ControlSignals {
             reg_write: true,
@@ -1216,7 +1243,6 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
             wb_src: WriteBackSrc::PC,
             mem_read: false,
         }),
-
         // branch
         0b110_0011 => Ok(ControlSignals {
             reg_write: false,
@@ -1228,7 +1254,6 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
             wb_src: WriteBackSrc::NA,
             mem_read: false,
         }),
-
         // load
         0b000_0011 => Ok(ControlSignals {
             reg_write: true,
@@ -1240,7 +1265,6 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
             wb_src: WriteBackSrc::Mem,
             mem_read: true,
         }),
-
         // store
         0b010_0011 => Ok(ControlSignals {
             reg_write: false,
@@ -1252,7 +1276,6 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
             wb_src: WriteBackSrc::NA,
             mem_read: false,
         }),
-
         // R-type
         0b011_0011 => Ok(ControlSignals {
             reg_write: true,
@@ -1264,7 +1287,6 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
             wb_src: WriteBackSrc::ALU,
             mem_read: false,
         }),
-
         // I-type
         0b001_0011 => Ok(ControlSignals {
             reg_write: true,
@@ -1276,7 +1298,6 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
             wb_src: WriteBackSrc::ALU,
             mem_read: false,
         }),
-
         _ => Err(anyhow::anyhow!("opcode not recognized")),
     }
 }
@@ -1347,25 +1368,36 @@ Now, `jalr`:
 The `ControlSignals` struct is a simple struct that contains all the control signals that the Control Unit generates for an instruction.
 
 ```rust
-/// a struct that holds the control signals that the Control Unit generates.
+/// a struct that holds the control signals that the Control Unit 
+/// generates.
 ///
-/// A decent chunk of these are actually entirely unnessary for this implementation, but are included nonetheless for completeness.
+/// A decent chunk of these are actually entirely unnessary for this
+/// implementation, but are included nonetheless for completeness.
 pub struct ControlSignals {
-    /// tells the register file to write to the register specified by the instruction.
+    /// tells the register file to write to the register specified by
+    /// the instruction.
     pub reg_write: bool,
-    /// The BranchJump signal is a 2 bit signal that tells the Branching and Jump Unit what type of branching to consider.
+    /// The BranchJump signal is a 2 bit signal that tells the Branching
+    /// and Jump Unit what type of branching to consider.
     pub branch_jump: BranchJump,
-    /// The ALUSrcA signal is a 1 bit signal that tells the ALU whether to use the register value (0), the PC (1), or the constant 0 as the second operand.
+    /// The ALUSrcA signal is a 1 bit signal that tells the ALU whether
+    /// to use the register value (0), the PC (1), or the constant 0 as
+    /// the second operand.
     pub alu_src_a: ALUSrcA,
-    /// The ALUSrcB signal is a 1 bit signal that tells the ALU whether to use the register value (0), the immediate value (1), or the constant 4 as the second operand.
+    /// The ALUSrcB signal is a 1 bit signal that tells the ALU whether
+    /// to use the register value (0), the immediate value (1), or the
+    /// constant 4 as the second operand.
     pub alu_src_b: ALUSrcB,
-    /// The ALU operation signal is a 2 bit signal that tells the ALU Control Unit what type of instruction is being executed.
+    /// The ALU operation signal is a 2 bit signal that tells the ALU
+    /// Control Unit what type of instruction is being executed.
     pub alu_op: ALUOp,
-    /// The mem_write signal is a 1 bit signal that tells the data memory unit whether to write to memory.
+    /// The mem_write signal is a 1 bit signal that tells the data
+    /// memory unit whether to write to memory.
     pub mem_write: bool,
     /// controls what source the write back stages uses.
     pub wb_src: WriteBackSrc,
-    /// The mem_read signal is a 1 bit signal that tells the data memory unit whether to read from memory.
+    /// The mem_read signal is a 1 bit signal that tells the data memory
+    /// unit whether to read from memory.
     pub mem_read: bool,
 }
 ```
@@ -1374,37 +1406,51 @@ The other control signals are defined as `u8` backed enums, implemented as follo
 
 ```rust
 #[repr(u8)]
-/// a 2 bit signal that tells the ALU Control Unit what type of instruction is being executed
+/// a 2 bit signal that tells the ALU Control Unit what type of
+/// instruction is being executed
 pub enum ALUOp {
-    /// The ALU should perform an ADD operation, this is the case for memory load and store instructions.
+    /// The ALU should perform an ADD operation, this is the case for
+    /// memory load and store instructions.
     #[default]
     ADD = 0b00,
-    /// The ALU should perform an operation specified by the funct3 field of the instruction (which specifies the type of branching to perform).
+    /// The ALU should perform an operation specified by the funct3
+    /// field of the instruction (which specifies the type of branching
+    /// to perform).
     /// This is the case for SB-type instructions.
     BRANCH = 0b01,
-    /// The ALU should perform an operation specified by the funct7 and funct3 fields of the instruction.
+    /// The ALU should perform an operation specified by the funct7 and
+    /// funct3 fields of the instruction.
     /// This is the case for R-type and I-type instructions.
     FUNCT = 0b10,
 }
+```
 
+```rust
 #[repr(u8)]
-/// a 1 bit signal that tells the ALU whether to use the register value (0), the PC (1), or the constant 0 as the second operand.
+/// a 1 bit signal that tells the ALU whether to use the register value
+/// (0), the PC (1), or the constant 0 as the second operand.
 pub enum ALUSrcA {
     #[default]
     Register = 0,
     PC = 1,
     Constant0 = 2,
 }
+```
 
+```rust
 #[repr(u8)]
-/// a 1 bit signal that tells the ALU whether to use the register value (0), the immediate value (1), or the constant 4 as the second operand.
+/// a 1 bit signal that tells the ALU whether to use the register value
+/// (0), the immediate value (1), or the constant 4 as the 
+/// second operand.
 pub enum ALUSrcB {
     #[default]
     Register = 0,
     Immediate = 1,
     Constant4 = 2,
 }
+```
 
+```rust
 #[repr(u8)]
 /// a 4 bit signal that tells the ALU what operation to perform.
 pub enum ALUControl {
@@ -1420,18 +1466,24 @@ pub enum ALUControl {
     SRL = 0b1000,
     SRA = 0b1010,
 }
+```
 
+```rust
 #[repr(u8)]
-/// a 2 bit control signal that tells the Branching and Jump Unit what type of branching to consider.
+/// a 2 bit control signal that tells the Branching and Jump Unit what
+/// type of branching to consider.
 pub enum BranchJump {
     #[default]
     No = 0b00,
     Branch = 0b01,
     Jal = 0b10,
 }
+```
 
+```rust
 #[repr(u8)]
-/// a 2 bit control signal that tells the WB stage what source to write back to the register file.
+/// a 2 bit control signal that tells the WB stage what source to write
+/// back to the register file.
 pub enum WriteBackSrc {
     #[default]
     NA = 0b00,
@@ -1465,23 +1517,22 @@ pub enum PCSrc {
 it provides a method to get the next program counter value based on the current program counter value.
 
 ```rust
-
 impl PCSrc {
     /// Calculate the next PC value based on the current PC value.
     ///
     /// # Arguments
-    ///
     /// * `pc` - the current program counter value
     ///
     /// # Returns
-    ///
     /// * `u32` - the next program counter value
     #[must_use]
     pub const fn next(&self, pc: u32) -> u32 {
         match self {
             Self::Init => 0,
             Self::Next => pc + 4,
-            Self::BranchTarget { offset } => pc.wrapping_add_signed(*offset),
+            Self::BranchTarget { offset } => {
+                pc.wrapping_add_signed(*offset)
+            }
             Self::JumpTarget { target } => *target,
             Self::End => pc,
         }
@@ -1514,7 +1565,8 @@ pub struct StageRegisters {
 The `Immediate` enum is a simple enum that represents the different types of immediate values in RISC-V instructions.
 
 ```rust
-/// An enum that represents the different types of immediate values in RISC-V instructions.
+/// An enum that represents the different types of immediate values in
+/// RISC-V instructions.
 pub enum Immediate {
     /// for I-type and S-type instructions
     SignedImmediate(i32),
@@ -1547,7 +1599,9 @@ pub enum IfId {
     /// used to flush the pipeline.
     Flush,
 }
+```
 
+```rust
 /// The ID/EX pipeline stage register.
 pub enum IdEx {
     /// the values that are passed from the ID stage to the EX stage.
@@ -1568,15 +1622,20 @@ pub enum IdEx {
     /// used to indicate a stall in the pipeline.
     Stall,
 }
+```
 
+```rust
 /// The EX/MEM pipeline stage register.
 pub enum ExMem {
     /// the values that are passed from the EX stage to the MEM stage.
     Ex {
         instruction: Instruction,
         alu_result: u32,
-        /// This variable will be updated by Execute() function and used when deciding to use branch target address in the next cycle.
-        /// The zero variable will be set to 1 by ALU when the computation result is zero and unset to 0 if otherwise.
+        /// This variable will be updated by `execute()` function and
+        /// used when deciding to use branch target address in the next
+        /// cycle.
+        /// The zero variable will be set to 1 by ALU when the
+        /// computation result is zero and unset to 0 if otherwise.
         alu_zero: bool,
         read_data_2: Option<u32>,
         /// the program counter value of the instruction.
@@ -1589,7 +1648,9 @@ pub enum ExMem {
     /// used to flush the pipeline.
     Flush,
 }
+```
 
+```rust
 /// The MEM/WB pipeline stage register.
 pub enum MemWb {
     /// the values that are passed from the MEM stage to the WB stage.
@@ -1605,12 +1666,18 @@ pub enum MemWb {
     /// used to flush the pipeline.
     Flush,
 }
+```
 
-/// used to store the value written to the register file in the WB stage, if any, for data forwarding
+```rust
+/// used to store the value written to the register file in the WB
+/// stage, if any, for data forwarding
 ///
-/// since we execute stages backwards, if we want to forward data from the MEM/WB stage to the ID/EX stage,
-/// we need to store the value written to the register file in the WB stage.
-/// Because otherwise, the value will be overwritten before we can forward it.
+/// since we execute stages backwards, if we want to forward data from
+/// the MEM/WB stage to the ID/EX stage,
+/// we need to store the value written to the register file in the WB
+/// stage.
+/// Because otherwise, the value will be overwritten before we can
+/// forward it.
 pub enum Wb {
     /// information needed by the forwarding unit
     Mem {
@@ -1633,15 +1700,19 @@ The Hazard Detection module contains the implementation of the data forwarding a
 These are 2 bit signals that the forwarding unit uses to tell the caller where to forward data from.
 
 ```rust
-/// a 2 bit signal that tells the forwarding unit what to forward to the ID/EX stage.
+/// a 2 bit signal that tells the forwarding unit what to forward 
+/// to the ID/EX stage.
 pub enum ForwardA {
     #[default]
     None = 0b00,
     ExMem = 0b10,
     MemWb = 0b01,
 }
+```
 
-/// a 2 bit signal that tells the forwarding unit what to forward to the ID/EX stage.
+```rust
+/// a 2 bit signal that tells the forwarding unit what to forward 
+/// to the ID/EX stage.
 pub enum ForwardB {
     #[default]
     None = 0b00,
@@ -1655,19 +1726,20 @@ pub enum ForwardB {
 The `forwarding_unit` function is the implementation of the data forwarding unit, it determines if data forwarding is needed for either of the operands of the ALU and specifies where the forwarded data should come from.
 
 ```rust
-/// The forwarding unit determines whether to forward data from the EX/MEM and/or MEM/WB stages to the ID/EX stage.
+/// The forwarding unit determines whether to forward data from the
+/// EX/MEM and/or MEM/WB stages to the ID/EX stage.
 ///
 /// # Arguments
-///
 /// * `exmem` - the values in the EX/MEM pipeline stage register.
 /// * `wb` - the values in the MEM/WB pipeline stage register.
 /// * `idex` - the values in the ID/EX pipeline stage register.
 ///
 /// # Returns
-///
 /// * `ForwardA` - the forwarding decision for source register 1.
 /// * `ForwardB` - the forwarding decision for source register 2.
-pub fn forwarding_unit(exmem: ExMem, wb: Wb, idex: IdEx) -> (ForwardA, ForwardB) {
+pub fn forwarding_unit(
+    exmem: ExMem, wb: Wb, idex: IdEx
+) -> (ForwardA, ForwardB) {
     // Initialize forwarding variables
     let mut forward_a = ForwardA::None;
     let mut forward_b = ForwardB::None;
@@ -1689,17 +1761,25 @@ pub fn forwarding_unit(exmem: ExMem, wb: Wb, idex: IdEx) -> (ForwardA, ForwardB)
 
     // Determine forwarding for source register 1
     match idex_source_reg1 {
-        None | Some(RegisterMapping::Zero) => (),
-        Some(rs1) if exmem_regwrite && exmem_dest_reg == rs1 => forward_a = ForwardA::ExMem,
-        Some(rs1) if memwb_regwrite && memwb_dest_reg == rs1 => forward_a = ForwardA::MemWb,
+        None | Some( RegisterMapping::Zero ) => (),
+        Some(rs1) if exmem_regwrite && exmem_dest_reg == rs1 => {
+            forward_a = ForwardA::ExMem
+        }
+        Some(rs1) if memwb_regwrite && memwb_dest_reg == rs1 => {
+            forward_a = ForwardA::MemWb
+        }
         _ => (),
     }
 
     // Determine forwarding for source register 2
     match idex_source_reg2 {
-        None | Some(RegisterMapping::Zero) => (),
-        Some(rs2) if exmem_regwrite && exmem_dest_reg == rs2 => forward_b = ForwardB::ExMem,
-        Some(rs2) if memwb_regwrite && memwb_dest_reg == rs2 => forward_b = ForwardB::MemWb,
+        None | Some( RegisterMapping::Zero ) => (),
+        Some(rs2) if exmem_regwrite && exmem_dest_reg == rs2 => {
+            forward_b = ForwardB::ExMem
+        }
+        Some(rs2) if memwb_regwrite && memwb_dest_reg == rs2 => {
+            forward_b = ForwardB::MemWb
+        }
         _ => (),
     }
 
@@ -1717,8 +1797,11 @@ The `HazardDetectionUnit` struct is a simple struct that contains the informatio
 The only reason that the forwarding unit isn't implemented this way is because this was done later in the project and I didn't feel like doing the refactor.
 
 ```rust
-/// The hazard detection unit determines whether there is a data hazard between the ID and EX stages that requires stalling (e.g. load-use hazards)
-/// (the forwarding unit handles rtype data hazards, and can handle load hazards if a stall was performed)
+/// The hazard detection unit determines whether there is a data hazard
+/// between the ID and EX stages that requires stalling
+/// (e.g. load-use hazards)
+/// (the forwarding unit handles rtype data hazards, and can handle load
+/// hazards if a stall was performed)
 pub struct HazardDetectionUnit {
     /// the source register 1 from the IF/ID stage
     ifid_rs1: Option<RegisterMapping>,
@@ -1726,7 +1809,8 @@ pub struct HazardDetectionUnit {
     ifid_rs2: Option<RegisterMapping>,
     /// the destination register from the ID/EX stage
     idex_rd: Option<RegisterMapping>,
-    /// a boolean indicating whether the instruction in the ID/EX stage writes to memory
+    /// a boolean indicating whether the instruction in the ID/EX 
+    /// stage writes to memory
     idex_memread: bool,
 }
 ```
@@ -1737,8 +1821,11 @@ Note how (due to the private fields), the `prime` function is the only way to cr
 
 ```rust
 impl HazardDetectionUnit {
-    /// prime the hazard detection unit with the relevant current pipeline state
-    pub const fn prime(decoded_instruction: Instruction, idex_reg: IdEx) -> Self {
+    /// prime the hazard detection unit with the relevant current
+    ///  pipeline state
+    pub const fn prime(
+        decoded_instruction: Instruction, idex_reg: IdEx
+    ) -> Self {
         let ifid_rs1 = decoded_instruction.rs1();
         let ifid_rs2 = decoded_instruction.rs2();
 
@@ -1765,14 +1852,18 @@ impl HazardDetectionUnit {
     /// Detect whether a stall is required to resolve a data hazard
     pub fn detect_stall_conditions(self) -> bool {
         // check for a hazard with rs1
-        let rs1_hazard = match (self.ifid_rs1, self.idex_rd, self.idex_memread) {
+        let rs1_hazard = match (
+            self.ifid_rs1, self.idex_rd, self.idex_memread
+        ) {
             // hazard in the ID/EX stage
             (Some(rs1), Some(rd), true) if rs1 == rd => true,
             _ => false,
         };
 
         // check for a hazard with rs2
-        let rs2_hazard = match (self.ifid_rs2, self.idex_rd, self.idex_memread) {
+        let rs2_hazard = match (
+            self.ifid_rs2, self.idex_rd, self.idex_memread
+        ) {
             // hazard in the ID/EX stage
             (Some(rs2), Some(rd), true) if rs2 == rd => true,
             _ => false,
@@ -1796,11 +1887,11 @@ Nothing here is really worth discussing in detail as it's not directly related t
 
 The project contains unit tests for the various modules, ensuring that core functionality is implemented correctly.
 
-##### ALU Module
+##### ALU module tests
 
 The `ALU` module (`alu.rs`) contains unit tests ensuring that the ALU correctly performs the various arithmetic operations required by the RISC-V ISA.
 
-```shell
+```terminal
 $ cargo test "alu::tests"
 
 running 10 tests
@@ -1818,11 +1909,11 @@ test alu::tests::test_alu_xor ... ok
 test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 22 filtered out; finished in 0.00s
 ```
 
-##### CPU Module
+##### CPU module tests
 
 The `CPU` module (`cpu.rs`) contains unit tests ensuring that each pipeline stage executes correctly, and that the CPU properly handles data hazards.
 
-```shell
+```terminal
 $ cargo test "cpu::tests"
 
 running 9 tests
@@ -1839,11 +1930,11 @@ test cpu::tests::test_data_rtype_hazard ... ok
 test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 23 filtered out; finished in 0.00s
 ```
 
-##### Instruction Module
+##### Instruction module tests
 
 The `Instruction` module (`instruction.rs`) contains unit tests ensuring that the `Instruction::from_machine_code` function can correctly decode various instructions.
 
-```shell
+```terminal
 $ cargo test "instruction::tests"
 
 running 9 tests
@@ -1864,7 +1955,7 @@ test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 23 filtered out; fin
 
 Integration tests in `lib.rs` ensure that the CPU correctly executes the provided sample programs.
 
-```shell
+```terminal
 $ cargo test "tests::test_sample"
 
 running 2 tests
@@ -1878,7 +1969,7 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 30 filtered out; fin
 
 #### Sample Program 1: Execution
 
-```shell
+```terminal
 $ cargo run
 
 Enter the name of the file name to run:
@@ -1949,7 +2040,7 @@ For reference, here is the pipeline table for sample program 1:
 
 #### Sample Program 2: Execution
 
-```shell
+```terminal
 $ cargo run
 
 Enter the name of the file name to run:
