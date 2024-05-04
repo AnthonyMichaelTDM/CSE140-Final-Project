@@ -53,7 +53,7 @@
         - [[#ALU module tests]]
         - [[#CPU module tests]]
         - [[#Instruction module tests]]
-      - [[#Integration Testing]]￼￼￼Sample Program 2: Pipeline Table￼
+      - [[#Integration Testing]]
     - [[#Sample Program 1]]
       - [[#Sample Program 1: Execution]]
       - [[#Sample Program 1: Pipeline Table]]
