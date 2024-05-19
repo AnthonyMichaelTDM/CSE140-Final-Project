@@ -3,11 +3,12 @@ use ux::{u3, u7};
 
 use crate::signals::{ALUControl, ALUOp};
 
-/// This function mimics the ALU Control Unit in a risc-v processor, it takes in the ALU operation signal, the funct3 field of the instruction and the funct7 field of the instruction and returns the ALU control signal.
+/// This function mimics the ALU Control Unit in a risc-v processor, it takes in the ALU operation signal,
+/// the `funct3` field of the instruction and the `funct7` field of the instruction and returns the ALU control signal.
 ///
 /// The ALU operation signal is a 2 bit signal that tells the ALU Control Unit what type of instruction is being executed.
 ///
-/// The funct3 and funct7 fields are used in combination with alu_op to determine the exact operation to be performed by the ALU.
+/// The `funct3` and `funct7` fields are used in combination with `alu_op` to determine the exact operation to be performed by the ALU.
 ///
 /// This function is an implementation of the following Verilog module:
 ///
@@ -53,6 +54,21 @@ use crate::signals::{ALUControl, ALUOp};
 /// ```
 ///
 /// but it is extended to handle various branch instructions.
+///
+/// # Arguments
+///
+/// * `alu_op` - a 2 bit signal that tells the ALU Control Unit what type of instruction is being executed.
+/// * `funct3` - a 3 bit signal that is used in combination with `alu_op` to determine the exact operation to be performed by the ALU.
+/// * `funct7` - a 7 bit signal that is used in combination with `alu_op` to determine the exact operation to be performed by the ALU.
+///
+/// # Returns
+///
+/// The ALU control signal.
+///
+/// # Errors
+///
+/// This function will return an error if the combination of `alu_op`, `funct3` and `funct7` doesn't match any of the valid combinations.
+#[allow(clippy::module_name_repetitions)]
 pub fn alu_control_unit(
     alu_op: ALUOp,
     funct3: Option<u3>,
@@ -61,25 +77,22 @@ pub fn alu_control_unit(
     Ok(match (alu_op, funct3.map(u8::from), funct7.map(u8::from)) {
         (ALUOp::ADD, _, _) => ALUControl::ADD,
         (ALUOp::BRANCH, Some(funct3), _) => match funct3 {
-            0b000 => ALUControl::SUB,  // beq
-            0b001 => ALUControl::SUB,  // bne
-            0b100 => ALUControl::SLT,  // blt
-            0b101 => ALUControl::SLT,  // bge
-            0b110 => ALUControl::SLTU, // bltu
-            0b111 => ALUControl::SLTU, // bgeu
-            _ => unreachable!("every 3 bit integer is covered in the above"),
+            0b000 | 0b001 => ALUControl::SUB,  // beq or bne
+            0b100 | 0b101 => ALUControl::SLT,  // blt or bge
+            0b110 | 0b111 => ALUControl::SLTU, // bltu or bgeu
+            _ => bail!("Invalid funct3 for branch instruction"),
         },
         (ALUOp::FUNCT, Some(funct3), Some(funct7)) => match (funct7, funct3) {
-            (0b0000000, 0b000) => ALUControl::ADD,  // add
-            (0b0100000, 0b000) => ALUControl::SUB,  // sub
-            (0b0000000, 0b111) => ALUControl::AND,  // and
-            (0b0000000, 0b110) => ALUControl::OR,   // or
-            (0b0000000, 0b010) => ALUControl::SLT,  // slt
-            (0b0000000, 0b011) => ALUControl::SLTU, // sltu
-            (0b0000000, 0b100) => ALUControl::XOR,  // xor
-            (0b0000000, 0b001) => ALUControl::SLL,  // sll, slli
-            (0b0000000, 0b101) => ALUControl::SRL,  // srl, srli
-            (0b0100000, 0b101) => ALUControl::SRA,  // sra, srai
+            (0b000_0000, 0b000) => ALUControl::ADD,  // add
+            (0b010_0000, 0b000) => ALUControl::SUB,  // sub
+            (0b000_0000, 0b111) => ALUControl::AND,  // and
+            (0b000_0000, 0b110) => ALUControl::OR,   // or
+            (0b000_0000, 0b010) => ALUControl::SLT,  // slt
+            (0b000_0000, 0b011) => ALUControl::SLTU, // sltu
+            (0b000_0000, 0b100) => ALUControl::XOR,  // xor
+            (0b000_0000, 0b001) => ALUControl::SLL,  // sll, slli
+            (0b000_0000, 0b101) => ALUControl::SRL,  // srl, srli
+            (0b010_0000, 0b101) => ALUControl::SRA,  // sra, srai
             _ => bail!("Invalid funct3 and funct7 combination"),
         },
         (ALUOp::FUNCT, Some(funct3), None) => match funct3 {
@@ -95,6 +108,22 @@ pub fn alu_control_unit(
     })
 }
 
+/// This function mimics the ALU in a risc-v processor, it takes in the ALU control signal, two 32-bit unsigned integers and returns a tuple of a boolean and a 32-bit unsigned integer.
+///
+/// # Arguments
+///
+/// * `alu_control` - the ALU control signal, determines the operation to perform.
+/// * `a` - the first operand.
+/// * `b` - the second operand.
+///
+/// # Returns
+///
+/// A tuple of a boolean and a 32-bit unsigned integer.
+///
+/// The boolean indicates whether the result of the operation is zero.
+///
+/// The 32-bit unsigned integer is the result of the operation.
+#[must_use]
 pub fn alu(alu_control: ALUControl, a: u32, b: u32) -> (bool, u32) {
     let result = match alu_control {
         ALUControl::ADD => a.wrapping_add(b),
@@ -102,10 +131,12 @@ pub fn alu(alu_control: ALUControl, a: u32, b: u32) -> (bool, u32) {
         ALUControl::AND => a & b,
         ALUControl::OR => a | b,
         ALUControl::SLL => a << b,
+        #[allow(clippy::cast_possible_wrap)]
         ALUControl::SLT => u32::from((a as i32) < (b as i32)),
         ALUControl::SLTU => u32::from(a < b),
         ALUControl::XOR => a ^ b,
         ALUControl::SRL => a >> b,
+        #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
         ALUControl::SRA => (a as i32 >> b) as u32,
     };
 

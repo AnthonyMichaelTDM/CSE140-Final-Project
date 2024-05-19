@@ -2,25 +2,26 @@ use anyhow::Result;
 use ux::u7;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
+#[allow(clippy::module_name_repetitions)]
 /// a struct that holds the control signals that the Control Unit generates.
 ///
 /// A decent chunk of these are actually entirely unnessary for this implementation, but are included nonetheless for completeness.
 pub struct ControlSignals {
     /// tells the register file to write to the register specified by the instruction.
     pub reg_write: bool,
-    /// The BranchJump signal is a 2 bit signal that tells the Branching and Jump Unit what type of branching to consider.
+    /// The `BranchJump` signal is a 2 bit signal that tells the Branching and Jump Unit what type of branching to consider.
     pub branch_jump: BranchJump,
-    /// The ALUSrcA signal is a 1 bit signal that tells the ALU whether to use the register value (0), the PC (1), or the constant 0 as the second operand.
+    /// The `ALUSrcA` signal is a 1 bit signal that tells the ALU whether to use the register value (0), the PC (1), or the constant 0 as the second operand.
     pub alu_src_a: ALUSrcA,
-    /// The ALUSrcB signal is a 1 bit signal that tells the ALU whether to use the register value (0), the immediate value (1), or the constant 4 as the second operand.
+    /// The `ALUSrcB` signal is a 1 bit signal that tells the ALU whether to use the register value (0), the immediate value (1), or the constant 4 as the second operand.
     pub alu_src_b: ALUSrcB,
     /// The ALU operation signal is a 2 bit signal that tells the ALU Control Unit what type of instruction is being executed.
     pub alu_op: ALUOp,
-    /// The mem_write signal is a 1 bit signal that tells the data memory unit whether to write to memory.
+    /// The `mem_write` signal is a 1 bit signal that tells the data memory unit whether to write to memory.
     pub mem_write: bool,
     /// controls what source the write back stages uses.
     pub wb_src: WriteBackSrc,
-    /// The mem_read signal is a 1 bit signal that tells the data memory unit whether to read from memory.
+    /// The `mem_read` signal is a 1 bit signal that tells the data memory unit whether to read from memory.
     pub mem_read: bool,
 }
 
@@ -77,16 +78,41 @@ pub enum ALUControl {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
-#[repr(u8)]
-/// a 2 bit signal that specifies where the next PC should come from.
+/// a signal that specifies where the next PC should come from.
 pub enum PCSrc {
+    /// Go to the first instruction in the program (initial PC value)
+    Init,
     #[default]
     /// The next PC value comes from PC + 4
-    Next = 0b00,
+    Next,
     /// The next PC value comes from the branch target address,
-    BranchTarget = 0b01,
+    BranchTarget { offset: i32 },
     /// The next PC value comes from the jump target address
-    JumpTarget = 0b10,
+    JumpTarget { target: u32 },
+    /// program has ended
+    End,
+}
+
+impl PCSrc {
+    /// Calculate the next PC value based on the current PC value.
+    ///
+    /// # Arguments
+    ///
+    /// * `pc` - the current program counter value
+    ///
+    /// # Returns
+    ///
+    /// * `u32` - the next program counter value
+    #[must_use]
+    pub const fn next(&self, pc: u32) -> u32 {
+        match self {
+            Self::Init => 0,
+            Self::Next => pc + 4,
+            Self::BranchTarget { offset } => pc.wrapping_add_signed(*offset),
+            Self::JumpTarget { target } => *target,
+            Self::End => pc,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
@@ -140,13 +166,13 @@ pub enum WriteBackSrc {
 pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
     match u8::from(opcode) {
         // lui
-        0b0110111 => Err(anyhow::anyhow!("lui instruction not supported yet")),
+        0b011_0111 => Err(anyhow::anyhow!("lui instruction not supported yet")),
 
         // auipc
-        0b0010111 => Err(anyhow::anyhow!("auipc instruction not supported yet")),
+        0b001_0111 => Err(anyhow::anyhow!("auipc instruction not supported yet")),
 
         // jal
-        0b1101111 => Ok(ControlSignals {
+        0b110_1111 => Ok(ControlSignals {
             reg_write: true,
             branch_jump: BranchJump::Jal,
             alu_src_a: ALUSrcA::PC,
@@ -158,7 +184,7 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
         }),
 
         // jalr
-        0b1100111 => Ok(ControlSignals {
+        0b110_0111 => Ok(ControlSignals {
             reg_write: true,
             branch_jump: BranchJump::Jal,
             alu_src_a: ALUSrcA::Register,
@@ -170,7 +196,7 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
         }),
 
         // branch
-        0b1100011 => Ok(ControlSignals {
+        0b110_0011 => Ok(ControlSignals {
             reg_write: false,
             branch_jump: BranchJump::Branch,
             alu_src_a: ALUSrcA::Register,
@@ -182,7 +208,7 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
         }),
 
         // load
-        0b0000011 => Ok(ControlSignals {
+        0b000_0011 => Ok(ControlSignals {
             reg_write: true,
             branch_jump: BranchJump::No,
             alu_src_a: ALUSrcA::Register,
@@ -194,7 +220,7 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
         }),
 
         // store
-        0b0100011 => Ok(ControlSignals {
+        0b010_0011 => Ok(ControlSignals {
             reg_write: false,
             branch_jump: BranchJump::No,
             alu_src_a: ALUSrcA::Register,
@@ -206,7 +232,7 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
         }),
 
         // R-type
-        0b0110011 => Ok(ControlSignals {
+        0b011_0011 => Ok(ControlSignals {
             reg_write: true,
             branch_jump: BranchJump::No,
             alu_src_a: ALUSrcA::Register,
@@ -218,7 +244,7 @@ pub fn control_unit(opcode: u7) -> Result<ControlSignals> {
         }),
 
         // I-type
-        0b0010011 => Ok(ControlSignals {
+        0b001_0011 => Ok(ControlSignals {
             reg_write: true,
             branch_jump: BranchJump::No,
             alu_src_a: ALUSrcA::Register,

@@ -4,13 +4,12 @@ use std::{
 };
 
 use anyhow::bail;
-use strum_macros::VariantNames;
 
 /// the number of registers in the RISC-V ISA
 pub const REGISTERS_COUNT: u8 = 32;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, PartialOrd, Ord, VariantNames)]
-#[strum(serialize_all = "lowercase")]
+/// This enum represents the mapping of the registers to their indices in the register file.
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum RegisterMapping {
     Zero = 0,
@@ -70,6 +69,7 @@ impl TryFrom<u8> for RegisterMapping {
     }
 }
 
+/// a struct that represents the register file of the CPU.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub struct RegisterFile {
     registers: [u32; REGISTERS_COUNT as usize],
@@ -93,6 +93,7 @@ impl IndexMut<RegisterMapping> for RegisterFile {
 }
 
 impl RegisterFile {
+    /// Create a new `RegisterFile` with all registers initialized to 0
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -101,6 +102,14 @@ impl RegisterFile {
     }
 
     /// Initialize the register file with the provided defaults, makes everything else 0
+    ///
+    /// # Arguments
+    ///
+    /// * `mappings` - a list of tuples where the first element is the register to write to and the second element is the value to write
+    ///
+    /// # Panics
+    ///
+    /// Panics if the register to write to is `RegisterMapping::Zero`
     pub fn initialize(&mut self, mappings: &[(RegisterMapping, u32)]) {
         self.registers = [0; REGISTERS_COUNT as usize];
         for (mapping, value) in mappings {
@@ -108,11 +117,26 @@ impl RegisterFile {
         }
     }
 
+    /// Read the value of a register
+    ///
+    /// # Arguments
+    ///
+    /// * `reg` - the register to read from
+    ///
+    /// # Returns
+    ///
+    /// The value of the register
     #[must_use]
     pub const fn read(&self, reg: RegisterMapping) -> u32 {
         self.registers[reg as usize]
     }
 
+    /// Write a value to a register
+    ///
+    /// # Arguments
+    ///
+    /// * `reg` - the register to write to
+    /// * `value` - the value to write
     pub fn write(&mut self, reg: RegisterMapping, value: u32) {
         self.registers[reg as usize] = value;
     }
