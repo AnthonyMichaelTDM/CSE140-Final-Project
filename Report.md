@@ -1,3 +1,8 @@
+---
+kind: lab
+school: UC Merced
+class: cse140
+---
 # CSE 140 Final Project Report
 
 **PROJECT TITLE:** Pipelined RISC-V Emulator
